@@ -56,12 +56,16 @@ var connection = knx.Connection({
     dp.on('event', function(evt, value) {
                    //onKnxEvent(evt, key, value, groupAddresses[key]);
        // need to check the evt type - is it Write!
-       console.log("**** %j %j reports current value: %j",  tdpga, evt, value);
+       console.log("%s **** %j %j reports current value: %j",
+		new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
+		tdpga, evt, value);
 
-	// write to influxDB
+        // need a guard as a GroupValue_Read has not value!
 
-	const date = new Date();
-	influx.writePoints([
+	if (evt == "GroupValue_Write" || evt == "GroupValue_Response") {
+	    // write to influxDB
+	    const date = new Date();
+	    influx.writePoints([
 	      {
 		measurement: 'knx',
 		tags: {
@@ -73,19 +77,22 @@ var connection = knx.Connection({
 	      }
 	    ], {
 	      database: 'hamon',
-	      precision: 's',
+	      precision: 'ms',
 	    })
 	    .catch(error => {
 	      console.error(`Error saving data to InfluxDB! ${error.stack}`)
-	 });
+	     });
+         }
     });
 
   },
+ /*
   event: function (evt, src, dest, value) {
    console.log("%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j",
     new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
     evt, src, dest, value);
   },
+ */
   error: function(connstatus) {
       console.log("**** ERROR: %j", connstatus);
   }
