@@ -1,6 +1,6 @@
 /*
  Simple script to test knx.js and validate connectivity
- It will list all events exposed on the bus via the KNX/IP router
+ It will list all events exposed on the bus via the KNXnet/IP router
 
 */
 
@@ -22,7 +22,6 @@ var connection = knx.Connection({
 
  // the following is the ip address for ha-test.dyndns.org
  // as the module needs ipv4/ipv6 address
- // ipAddr: '92.15.30.220', ipPort: 50001, - old
  //ipAddr: '92.15.29.57', ipPort: 50001,
  ipAddr: knxAddr, ipPort: knxPort,
  //ipAddr: knxAddr, ipPort: 50001,
@@ -36,16 +35,7 @@ var connection = knx.Connection({
   connected: function() {
     console.log('Connected!');
   },
-  GroupValue_Read: function (src, dest) {
-   console.log("%s **** KNX READ: src: %j, dest: %j",
-    new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
-    src, dest);
-  },
-  GroupValue_Response: function (src, dest, value) {
-   console.log("%s **** KNX RESPONSE: src: %j, dest: %j, value %j",
-    new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
-    src, dest, value);
-  },
+
   event: function (evt, src, dest, value) {
    console.log("%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j",
     new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
