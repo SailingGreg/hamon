@@ -1,0 +1,20 @@
+# 
+# hamon server systemd service configuration file
+# install to /lib/systemd/system/hamon.service
+# then systemctl daemon-reload
+# & then systemctl enable hamon.service
+# & then systemctl enable start hamon.service
+
+[Unit]
+Description=HA KNX Monitoring Service
+After=multi-user.target
+
+[Service]
+Type=idle
+
+ExecStart=/usr/bin/node /home/pi/hamon/ha-temp.js
+StandardOutput=file:/home/pi/hamon/hamon.log
+StandardError=file:/home/pi/hamon/hamon.err
+
+[Install]
+WantedBy=multi-user.target

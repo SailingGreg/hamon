@@ -6,6 +6,16 @@
 
 // load knx ip stack
 var knx = require('knx');
+//const dns = require('dns');
+var dnsSync = require('dns-sync');
+
+var knxnetIP = "ha-test.dyndns.org";
+var knxAddr = "";
+var knxPort = 50001;
+
+// resolve the KNXnet/IP router
+knxAddr = dnsSync.resolve(knxnetIP);
+console.log('KNXnet/IP %s -> %s', knxnetIP, knxAddr);
 
 // and create connection
 var connection = knx.Connection({
@@ -13,7 +23,9 @@ var connection = knx.Connection({
  // the following is the ip address for ha-test.dyndns.org
  // as the module needs ipv4/ipv6 address
  // ipAddr: '92.15.30.220', ipPort: 50001, - old
- ipAddr: '92.19.140.228', ipPort: 50001,
+ //ipAddr: '92.15.29.57', ipPort: 50001,
+ ipAddr: knxAddr, ipPort: knxPort,
+ //ipAddr: knxAddr, ipPort: 50001,
  // may be incorrect
  //physAddr: '0.1.0',
  // ensure it tunneling and not operating n hybrid mode
