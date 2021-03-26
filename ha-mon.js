@@ -1,9 +1,10 @@
 /*
- * Simple script to test knx.js and validate connectivity
- * It will list all events exposed on the bus via the KNX/IP router
- * 
+ * File: ha-mon.js - monitor all exported group addresses
+ *
  * this parse and creates a dp for each groupaddress and on an event
  * if will record the value if it is associated with a group address
+ *
+ *
 */
 
 // load knx ip stack
@@ -12,7 +13,9 @@ var knx = require('knx');
 //const dns = require('dns');
 var dnsSync = require('dns-sync');
 const ets = require('./parsexml');
+const Influx = require('influx');
 
+// host and port - move to config file
 var knxnetIP = "ha-test.dyndns.org";
 var knxAddr = "";
 var knxPort = 50001;
@@ -26,6 +29,53 @@ var dp = ""; // the datapoint
 
 // parse the ETS export for the GAs
 let groupAddresses = ets.parsexml("ga.xml") || {};
+
+// create the influxDB connection
+const influx = new Influx.InfluxDB({
+  host: 'localhost',
+  database: 'hamon',
+  username: 'grafana',
+  password: 'Grafana',
+  schema: [
+    {
+      // the database 'table'
+      measurement: 'knx2',
+      // we have INTEGER, FLOAT, STRING & BOOLEAN,
+      fields: { value: Influx.FieldType.FLOAT },
+      tags: ['event', 'source', 'groupaddr']
+    }
+  ]
+});
+
+// write to influxDB
+let writeEvents = function (evt, src, dest, name, value, unit) {
+    if (evt != "GroupValue_Write" && evt != "GroupValue_Response")
+	return;
+
+    // define the event type - Write or Response
+    var evtType = (evt == "GroupValue_Write") ? "Write" : "Response";
+
+    // write to influxDB
+    const date = new Date();
+    influx.writePoints([
+	    {
+		measurement: 'knx2',
+		tags: {
+		  event: evtType,
+		  source: src,
+		  groupaddr: dest,
+		},
+		fields: { value: value },
+		timestamp: date,
+	    }
+	    ], {
+	      database: 'hamon',
+	      precision: 'ms',
+	})
+	    .catch(error => {
+	      console.error(`Error saving data to InfluxDB! ${error.stack}`)
+    });
+}
 
 // and create connection
 var connection = knx.Connection({
@@ -71,14 +121,13 @@ var connection = knx.Connection({
 
   // on event we get src/dest/value
   event: function (evt, src, dest, value) {
-    /*
+    /* debug
    console.log("%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j",
     new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
     evt, src, dest, value);
     */
 
     // check for dp.options.ga?
-    //console.log("dp options: %j", dp.options.ga);
 
     // if this a known end point - record values
     if (groupAddresses.hasOwnProperty(dest)) {
@@ -90,22 +139,12 @@ var connection = knx.Connection({
             groupAddresses[dest].unit);
 
 	// encode the evt to shorten it - "gw" or "re"
-        /*
-        writedb (evt, src, dest, name, value, unit);
-        */
+        writeEvents (evt, src, dest, 
+            groupAddresses[dest].name,
+            groupAddresses[dest].endpoint.current_value,
+            groupAddresses[dest].unit);
     }
 
-    //if (dest == '0/1/0') {
-    if (dest == dp.options.ga) {
-	//var jsvalue = DPTLib.fromBuffer(value, dp.dpt);
-        //console.log(">>> value: %j", dp.current_value);
-
-        // relying on change() to update this
-        var jsval = dp.current_value;
-
-        //console.log(">> %j, src: %j, dest: %j, value: %j - %j",
-    	//			evt, src, dest, value, jsval);
-    }
   },
 
   error: function(connstatus) {
