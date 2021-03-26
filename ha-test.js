@@ -22,9 +22,7 @@ var connection = knx.Connection({
 
  // the following is the ip address for ha-test.dyndns.org
  // as the module needs ipv4/ipv6 address
- //ipAddr: '92.15.29.57', ipPort: 50001,
  ipAddr: knxAddr, ipPort: knxPort,
- //ipAddr: knxAddr, ipPort: 50001,
  // may be incorrect
  //physAddr: '0.1.0',
  // ensure it tunneling and not operating n hybrid mode

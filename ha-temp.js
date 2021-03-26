@@ -7,8 +7,17 @@
 // load knx ip stack
 var knx = require('knx');
 const Influx = require('influx');
+var dnsSync = require('dns-sync');
 
 inited = false; // guard condition
+
+var knxnetIP = "ha-test.dyndns.org";
+var knxAddr = "";
+var knxPort = 50001;
+
+// resolve the KNXnet/IP router
+knxAddr = dnsSync.resolve(knxnetIP);
+console.log('KNXnet/IP %s -> %s', knxnetIP, knxAddr);
 
 // create the influxDB connection
 const influx = new Influx.InfluxDB({
@@ -74,9 +83,7 @@ let knxEvent = function(evt, value, dp) {
 var connection = knx.Connection({
 
  // the following is the ip address for ha-test.dyndns.org
- //ipAddr: '92.15.30.220', ipPort: 50001,
- //ipAddr: '92.19.140.228', ipPort: 50001,
- ipAddr: '92.15.29.57', ipPort: 50001,
+ ipAddr: knxAddr, ipPort: knxPort,
  // may be incorrect
  //physAddr: '0.1.0',
  // ensure it tunneling and not operating n hybrid mode
