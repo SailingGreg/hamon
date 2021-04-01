@@ -1,0 +1,16 @@
+{
+  "dependencies": {
+    "dns-sync": "^0.2.1",
+    "influx": "^5.8.0",
+    "knx": "^2.3.8",
+    "knx.js": "^0.7.4",
+    "xml-js": "^1.6.11"
+  },
+  "name": "hamon",
+  "version": "1.0.0",
+  "description": "KNX monitoring system",
+  "main": "index.js",
+  "repository": "https://github.com/SailingGreg/hamon",
+  "author": "Greg Brougham <greg.brougham@gmail.com>",
+  "license": "MIT"
+}
