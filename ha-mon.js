@@ -28,7 +28,9 @@ var inited = false;
 var dp = ""; // the datapoint
 
 // parse the ETS export for the GAs
-let groupAddresses = ets.parsexml("ga.xml") || {};
+// added absolute path for SUSE
+var loc = "/home/greg/hamon/"
+let groupAddresses = ets.parsexml(loc + "ga.xml") || {};
 
 // create the influxDB connection
 const influx = new Influx.InfluxDB({
@@ -42,7 +44,7 @@ const influx = new Influx.InfluxDB({
       measurement: 'knx2',
       // we have INTEGER, FLOAT, STRING & BOOLEAN,
       fields: { value: Influx.FieldType.FLOAT },
-      tags: ['event', 'source', 'groupaddr']
+      tags: ['event', 'source', 'groupaddr', 'name']
     }
   ]
 });
@@ -64,6 +66,7 @@ let writeEvents = function (evt, src, dest, name, value, unit) {
 		  event: evtType,
 		  source: src,
 		  groupaddr: dest,
+		  name: name,
 		},
 		fields: { value: value },
 		timestamp: date,
