@@ -14,22 +14,45 @@ var knx = require('knx');
 var dnsSync = require('dns-sync');
 const ets = require('./parsexml');
 const Influx = require('influx');
+const winston = require('winston');
 
 // host and port - move to config file
 var knxnetIP = "ha-test.dyndns.org";
 var knxAddr = "";
 var knxPort = 50001;
 
+// set the location/path
+//var loc = "/home/greg/hamon/"
+var loc = "./"
+
+// create the logger
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.colorize(),
+    winston.format.splat(),
+    winston.format.simple(),
+  ),
+  defaultMeta: { service: 'ha-mon' },
+  transports: [
+    //
+    // - Write all logs with level `error` and below to `error.log`
+    // - Write all logs with level `info` and below to `combined.log`
+    //
+    new winston.transports.File({ filename: loc+'error.log', level: 'error' }),
+    new winston.transports.File({ filename: loc+'combined.log' }),
+  ],
+});
+
 // resolve the KNXnet/IP router
 knxAddr = dnsSync.resolve(knxnetIP);
-console.log('KNXnet/IP %s -> %s', knxnetIP, knxAddr);
+logger.info('KNXnet/IP %s -> %s', knxnetIP, knxAddr);
 
 var inited = false;
 var dp = ""; // the datapoint
 
 // parse the ETS export for the GAs
 // added absolute path for SUSE
-var loc = "/home/greg/hamon/"
 let groupAddresses = ets.parsexml(loc + "ga.xml") || {};
 
 // create the influxDB connection
@@ -76,7 +99,7 @@ let writeEvents = function (evt, src, dest, name, value, unit) {
 	      precision: 'ms',
 	})
 	    .catch(error => {
-	      console.error(`Error saving data to InfluxDB! ${error.stack}`)
+	      logger.error(`Error saving data to InfluxDB! ${error.stack}`)
     });
 }
 
@@ -97,13 +120,13 @@ var connection = knx.Connection({
  //loglevel: 'debug',
  handlers: {
   connected: function() {
-    console.log('Connected!');
+    logger.info('Connected!');
 
     if (inited ==  false) { // only for this once
 	// create single dp for temp
         var tdpga = '0/1/0';
         dp = new knx.Datapoint({ga: tdpga, dpt: 'DPT9.001'}, connection);
-        //console.log("dp.options.ga - %s: ", dp.options.ga);
+        //logger.info("dp.options.ga - %s: ", dp.options.ga);
 
        inited = true;
 
@@ -118,14 +141,14 @@ var connection = knx.Connection({
                cnt = cnt + 1;
            }
        }
-       console.log("Processed %j groupAddresses[]: ", cnt);
+       logger.info("Processed %j groupAddresses[]: ", cnt);
     }
   },
 
   // on event we get src/dest/value
   event: function (evt, src, dest, value) {
     /* debug
-   console.log("%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j",
+   logger.info("%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j",
     new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
     evt, src, dest, value);
     */
@@ -134,7 +157,7 @@ var connection = knx.Connection({
 
     // if this a known end point - record values
     if (groupAddresses.hasOwnProperty(dest)) {
-        console.log(">> %s Event %j -> %j (%s) - %j %s",
+        logger.info(">> %s Event %j -> %j (%s) - %j %s",
     	    new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
  	    src, dest,
             groupAddresses[dest].name,
@@ -151,7 +174,7 @@ var connection = knx.Connection({
   },
 
   error: function(connstatus) {
-      console.log("**** ERROR: %j", connstatus);
+      logger.error("**** ERROR: %j", connstatus);
   }
  }
 });
