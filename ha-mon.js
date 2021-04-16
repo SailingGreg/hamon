@@ -22,8 +22,11 @@ var knxAddr = "";
 var knxPort = 50001;
 
 // set the location/path
-//var loc = "/home/greg/hamon/"
-var loc = "./"
+let host = process.env.HOST // check for HOST=ha-test
+if (typeof host == 'undefined')
+    var loc = "./";
+else
+    var loc = "/home/greg/hamon/";
 
 // create the logger
 const logger = winston.createLogger({
@@ -67,13 +70,13 @@ const influx = new Influx.InfluxDB({
       measurement: 'knx2',
       // we have INTEGER, FLOAT, STRING & BOOLEAN,
       fields: { value: Influx.FieldType.FLOAT },
-      tags: ['event', 'source', 'groupaddr', 'name']
+      tags: ['event', 'source', 'groupaddr', 'name', 'type']
     }
   ]
 });
 
 // write to influxDB
-let writeEvents = function (evt, src, dest, name, value, unit) {
+let writeEvents = function (evt, src, dest, name, type, value, unit) {
     if (evt != "GroupValue_Write" && evt != "GroupValue_Response")
 	return;
 
@@ -90,6 +93,7 @@ let writeEvents = function (evt, src, dest, name, value, unit) {
 		  source: src,
 		  groupaddr: dest,
 		  name: name,
+		  'type': type,
 		},
 		fields: { value: value },
 		timestamp: date,
@@ -136,8 +140,10 @@ var connection = knx.Connection({
            if (groupAddresses.hasOwnProperty(key)) {
 		// construct dp for the groupaddress
                let dp = new knx.Datapoint({ga: key, dpt: groupAddresses[key].dpt}, connection);
+		//console.log("New dp %j", dp.dpt.subtype.name);
                groupAddresses[key].endpoint = dp;
                groupAddresses[key].unit = dp.dpt.subtype !== undefined ? dp.dpt.subtype.unit || '' : '';
+               groupAddresses[key].type = dp.dpt.subtype !== undefined ? dp.dpt.subtype.name || '' : '';
                cnt = cnt + 1;
            }
        }
@@ -157,16 +163,21 @@ var connection = knx.Connection({
 
     // if this a known end point - record values
     if (groupAddresses.hasOwnProperty(dest)) {
-        logger.info(">> %s Event %j -> %j (%s) - %j %s",
+        logger.info(">> %s Event %j -> %j (%s - %s) - %j %s",
     	    new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
  	    src, dest,
             groupAddresses[dest].name,
+            groupAddresses[dest].type,
             groupAddresses[dest].endpoint.current_value,
             groupAddresses[dest].unit);
+
+	//console.log("Endpoint %j", groupAddresses[dest].endpoint.dpt);
+
 
 	// encode the evt to shorten it - "gw" or "re"
         writeEvents (evt, src, dest, 
             groupAddresses[dest].name,
+            groupAddresses[dest].type,
             groupAddresses[dest].endpoint.current_value,
             groupAddresses[dest].unit);
     }
