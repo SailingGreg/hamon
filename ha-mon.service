@@ -10,6 +10,7 @@ Description=HA KNX Monitoring Service
 After=multi-user.target
 
 [Service]
+Environment=HOME=/home/greg
 Type=idle
 
 # working directory is /home/greg/hamon

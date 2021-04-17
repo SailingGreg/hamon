@@ -10,9 +10,10 @@ Description=HA KNX Monitoring Service
 After=multi-user.target
 
 [Service]
+Environment=HOME=/home/pi
 Type=idle
 
-ExecStart=/usr/bin/node /home/pi/hamon/ha-temp.js
+ExecStart=/usr/bin/node /home/pi/hamon/ha-mon.js
 StandardOutput=file:/home/pi/hamon/hamon.log
 StandardError=file:/home/pi/hamon/hamon.err
 

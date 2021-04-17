@@ -21,12 +21,22 @@ var knxnetIP = "ha-test.dyndns.org";
 var knxAddr = "";
 var knxPort = 50001;
 
-// set the location/path
-let host = process.env.HOST // check for HOST=ha-test
-if (typeof host == 'undefined')
-    var loc = "./";
-else
-    var loc = "/home/greg/hamon/";
+// set the location/path - done in ha-mon.service file
+console.log(process.env); 
+let home = process.env.HOME; // check for HOST=ha-test
+if (typeof home == 'undefined') {
+    var loc = "/home/pi/hamon/";
+} else 
+    var loc = home + "/hamon/";
+
+// return local date/time - this uses ISO structure
+function localDate() {
+    var date = new Date(); // Or the date you'd like converted.
+    var isoDateTime = new Date(date.getTime() - (date.getTimezoneOffset() * 60000)).toISOString();
+
+    //new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
+    return isoDateTime;
+}
 
 // create the logger
 const logger = winston.createLogger({
@@ -84,7 +94,7 @@ let writeEvents = function (evt, src, dest, name, type, value, unit) {
     var evtType = (evt == "GroupValue_Write") ? "Write" : "Response";
 
     // write to influxDB
-    const date = new Date();
+    const date = new Date(); // this is UTC
     influx.writePoints([
 	    {
 		measurement: 'knx2',
@@ -155,7 +165,7 @@ var connection = knx.Connection({
   event: function (evt, src, dest, value) {
     /* debug
    logger.info("%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j",
-    new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
+    new localDate().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
     evt, src, dest, value);
     */
 
@@ -164,7 +174,7 @@ var connection = knx.Connection({
     // if this a known end point - record values
     if (groupAddresses.hasOwnProperty(dest)) {
         logger.info(">> %s Event %j -> %j (%s - %s) - %j %s",
-    	    new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
+    	    new localDate().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
  	    src, dest,
             groupAddresses[dest].name,
             groupAddresses[dest].type,
