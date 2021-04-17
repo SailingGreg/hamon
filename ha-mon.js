@@ -31,7 +31,7 @@ if (typeof home == 'undefined') {
 
 // return local date/time - this uses ISO structure
 function localDate() {
-    var date = new Date(); // Or the date you'd like converted.
+    var date = new Date();
     var isoDateTime = new Date(date.getTime() - (date.getTimezoneOffset() * 60000)).toISOString();
 
     //new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
@@ -164,17 +164,19 @@ var connection = knx.Connection({
   // on event we get src/dest/value
   event: function (evt, src, dest, value) {
     /* debug
+   ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
    logger.info("%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j",
-    new localDate().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
-    evt, src, dest, value);
+    ctime, evt, src, dest, value);
     */
 
     // check for dp.options.ga?
 
     // if this a known end point - record values
     if (groupAddresses.hasOwnProperty(dest)) {
+    	ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
+	
         logger.info(">> %s Event %j -> %j (%s - %s) - %j %s",
-    	    new localDate().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
+    	    ctime,
  	    src, dest,
             groupAddresses[dest].name,
             groupAddresses[dest].type,
