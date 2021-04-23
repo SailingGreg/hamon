@@ -71,7 +71,7 @@ if (fs.existsSync(hamonConfig)) {
 }
 
 // this parse and expands the configuration
-const doc = yaml.load(fs.readFileSync('hamon.yml', 'utf8'));
+const doc = yaml.load(fs.readFileSync(hamonConfig, 'utf8'));
 cnt = 0;
 for (deploy in doc["locations"]) {
     cnt = cnt + 1;
