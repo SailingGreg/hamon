@@ -49,7 +49,7 @@ try {
 
       // check dns entries
       dnsEntry = install['dns']
-      etsEntry = install['ets']
+      etsEntry = install['config']
       console.log("Checking location %s -> %s", install['name'], dnsEntry);
       ipaddr = dnsSync.resolve(dnsEntry);
       if (ipaddr != null) {
