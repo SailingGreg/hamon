@@ -15,14 +15,16 @@ var dnsSync = require('dns-sync');
 const ets = require('./parsexml');
 const Influx = require('influx');
 const winston = require('winston');
+const yaml = require('js-yaml');
+const fs   = require('fs');
 
 // host and port - move to config file
 var knxnetIP = "ha-test.dyndns.org";
 var knxAddr = "";
 var knxPort = 50001;
 
-// set the location/path - done in ha-mon.service file
-console.log(process.env); 
+// set the location/path - done in systemd service file
+//console.log(process.env); 
 let home = process.env.HOME; // check for HOST=ha-test
 if (typeof home == 'undefined') {
     var loc = "/home/pi/hamon/";
@@ -57,6 +59,31 @@ const logger = winston.createLogger({
   ],
 });
 
+// check for the YAML based configuration
+const hamonConfig = loc + "hamon.yml"; // the configuration file - add location
+
+if (fs.existsSync(hamonConfig)) {
+    //file exists
+    logger.info("Configuration file %s exists, parsing ...", hamonConfig);
+} else {
+    logger.error("Configuration file %s doesn't exist", hamonConfig);
+    return false;
+}
+
+// this parse and expands the configuration
+const doc = yaml.load(fs.readFileSync('hamon.yml', 'utf8'));
+cnt = 0;
+for (deploy in doc["locations"]) {
+    cnt = cnt + 1;
+    install = doc["locations"][deploy]
+    logger.info("\t %s %s %s %d", deploy, install['name'], install['dns'], install['port']);
+    if (install['name'] == "office") {
+        knxnetIP = install['dns'];
+        knxnetPort = install['port'];
+        knxnetXML = install['config'];
+    }
+}
+
 // resolve the KNXnet/IP router
 knxAddr = dnsSync.resolve(knxnetIP);
 logger.info('KNXnet/IP %s -> %s', knxnetIP, knxAddr);
@@ -64,9 +91,9 @@ logger.info('KNXnet/IP %s -> %s', knxnetIP, knxAddr);
 var inited = false;
 var dp = ""; // the datapoint
 
-// parse the ETS export for the GAs
-// added absolute path for SUSE
-let groupAddresses = ets.parsexml(loc + "ga.xml") || {};
+// parse the ETS export for the GAs - added absolute path for SUSE
+let groupAddresses = ets.parsexml(loc + knxnetXML) || {};
+//let groupAddresses = ets.parsexml(loc + "ga.xml") || {};
 
 // create the influxDB connection
 const influx = new Influx.InfluxDB({
