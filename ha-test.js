@@ -12,8 +12,8 @@ const yaml = require('js-yaml');
 const fs   = require('fs');
 
 var knxnetIP = "ha-test.dyndns.org";
-var knxAddr = "";
-var knxPort = 50001;
+var knxnetAddr = "";
+var knxnetPort = 50001;
 
 fileArg = "hamon.yml";
 
@@ -49,15 +49,15 @@ for (deploy in doc["locations"]) {
 console.log("Running for %s ", knxLoc);
 
 // resolve the KNXnet/IP router
-knxAddr = dnsSync.resolve(knxnetIP);
-console.log('KNXnet/IP %s -> %s', knxnetIP, knxAddr);
+knxnetAddr = dnsSync.resolve(knxnetIP);
+console.log('KNXnet/IP %s -> %s:%d', knxnetIP, knxnetAddr, knxnetPort);
 
 // and create connection
 var connection = knx.Connection({
 
  // the following is the ip address for ha-test.dyndns.org
  // as the module needs ipv4/ipv6 address
- ipAddr: knxAddr, ipPort: knxPort,
+ ipAddr: knxnetAddr, ipPort: knxnetPort,
  // may be incorrect
  //physAddr: '0.1.0',
  // ensure it tunneling and not operating n hybrid mode
