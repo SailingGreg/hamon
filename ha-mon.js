@@ -115,7 +115,7 @@ const influx = new Influx.InfluxDB({
 });
 
 // write to influxDB
-let writeEvents = function (evt, src, dest, name, knxloc, type, value, unit) {
+let writeEvents = function (evt, src, dest, knxloc, name, type, value, unit) {
     if (evt != "GroupValue_Write" && evt != "GroupValue_Response")
 	return;
 
