@@ -8,10 +8,45 @@
 var knx = require('knx');
 //const dns = require('dns');
 var dnsSync = require('dns-sync');
+const yaml = require('js-yaml');
+const fs   = require('fs');
 
 var knxnetIP = "ha-test.dyndns.org";
 var knxAddr = "";
 var knxPort = 50001;
+
+fileArg = "hamon.yml";
+
+//console.log(process.argv);
+var knxLoc = process.argv[2];
+if (knxLoc == undefined || knxLoc == "") {
+    console.log ("usage: %s {location}", process.argv[1]);
+    return 1;
+}
+
+if (fs.existsSync("./" + fileArg)) {
+    console.log ("Parsing configuration file %s", fileArg);
+} else {
+    console.log ("Configuration file %s doesn't exist", fileArg);
+    return 1;
+}
+
+// this parse and expands the configuration
+const doc = yaml.load(fs.readFileSync(fileArg, 'utf8'));
+cnt = 0;
+for (deploy in doc["locations"]) {
+    cnt = cnt + 1;
+    install = doc["locations"][deploy]
+    console.log("\t %s %s %s %d", deploy, install['name'], install['dns'], install['port']);
+    if (install['name'] == knxLoc) {
+        knxnetIP = install['dns'];
+        knxnetPort = install['port'];
+        knxnetXML = install['config'];
+    }
+}
+
+// resolve the KNXnet/IP router
+console.log("Running for %s ", knxLoc);
 
 // resolve the KNXnet/IP router
 knxAddr = dnsSync.resolve(knxnetIP);
