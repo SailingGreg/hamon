@@ -22,6 +22,7 @@ const fs   = require('fs');
 var knxnetIP = "ha-test.dyndns.org";
 var knxAddr = "";
 var knxPort = 50001;
+var knxLoc = "";
 
 // set the location/path - done in systemd service file
 //console.log(process.env); 
@@ -77,7 +78,8 @@ for (deploy in doc["locations"]) {
     cnt = cnt + 1;
     install = doc["locations"][deploy]
     logger.info("\t %s %s %s %d", deploy, install['name'], install['dns'], install['port']);
-    if (install['name'] == "office") {
+    if (install['name'] == "home") {
+        knxnetLoc = install['name'];
         knxnetIP = install['dns'];
         knxnetPort = install['port'];
         knxnetXML = install['config'];
@@ -107,13 +109,13 @@ const influx = new Influx.InfluxDB({
       measurement: 'knx2',
       // we have INTEGER, FLOAT, STRING & BOOLEAN,
       fields: { value: Influx.FieldType.FLOAT },
-      tags: ['event', 'source', 'groupaddr', 'name', 'type']
+      tags: ['location', 'event', 'source', 'groupaddr', 'name', 'type']
     }
   ]
 });
 
 // write to influxDB
-let writeEvents = function (evt, src, dest, name, type, value, unit) {
+let writeEvents = function (evt, src, dest, name, knxloc, type, value, unit) {
     if (evt != "GroupValue_Write" && evt != "GroupValue_Response")
 	return;
 
@@ -126,6 +128,7 @@ let writeEvents = function (evt, src, dest, name, type, value, unit) {
 	    {
 		measurement: 'knx2',
 		tags: {
+		  location: knxloc,
 		  event: evtType,
 		  source: src,
 		  groupaddr: dest,
@@ -151,8 +154,7 @@ var connection = knx.Connection({
  // as the module needs ipv4/ipv6 address
  // ipAddr: '92.15.30.220', ipPort: 50001, - old
  //ipAddr: '92.15.29.57', ipPort: 50001,
- ipAddr: knxAddr, ipPort: knxPort,
- //ipAddr: knxAddr, ipPort: 50001,
+ ipAddr: knxAddr, ipPort: knxnetPort,
  // may be incorrect
  //physAddr: '0.1.0',
  // ensure it tunneling and not operating n hybrid mode
@@ -214,7 +216,7 @@ var connection = knx.Connection({
 
 
 	// encode the evt to shorten it - "gw" or "re"
-        writeEvents (evt, src, dest, 
+        writeEvents (evt, src, dest, knxnetLoc,
             groupAddresses[dest].name,
             groupAddresses[dest].type,
             groupAddresses[dest].endpoint.current_value,
