@@ -2,9 +2,10 @@ const knx = require('knx')
 const { workerData } = require('worker_threads')
 const ets = require('../parsexml')
 const logger = require('./logger')
+const { writeEvents } = require('./db')
 const dnsSync = require('dns-sync')
 
-const { dns, port, config } = workerData?.location
+const { dns, port, config, name } = workerData?.location
 
 const knxAddr = dnsSync.resolve(dns)
 
@@ -67,7 +68,8 @@ const connection = knx.Connection({
           evt,
           src,
           dest,
-          knxnetLoc,
+          //knxnetLoc,
+          name,
           groupAddresses[dest].name,
           groupAddresses[dest].type,
           groupAddresses[dest].endpoint.current_value,

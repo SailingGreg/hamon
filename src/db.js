@@ -1,4 +1,5 @@
 const Influx = require('influx')
+const logger = require('./logger')
 
 // influxDB connection
 const influx = new Influx.InfluxDB({
