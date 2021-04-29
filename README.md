@@ -11,3 +11,6 @@ node worker.js
 
 # To tun ha-mon.js with multi-thread
 node src
+
+# To run with nodemon watching hamon.yml update
+npm run dev || yanr dev

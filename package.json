@@ -5,8 +5,12 @@
     "js-yaml": "^4.1.0",
     "knx": "^2.3.8",
     "knx.js": "^0.7.4",
+    "nodemon": "^2.0.7",
     "winston": "^3.3.3",
     "xml-js": "^1.6.11"
+  },
+  "scripts": {
+    "dev": "nodemon src --watch hamon.yml"
   },
   "name": "hamon",
   "version": "1.0.0",
