@@ -1,10 +1,26 @@
+/*
+ * hamon.js (index.js) the KNX Monitoring program
+ *
+ * Checks location and call services to parse and run
+ *
+ *
+ */
+
 const fs = require('fs')
 const { runService } = require('./service')
 const logger = require('./logger')
 
-const hamonConfig = 'hamon.yml'
+// location check - HOME
+let home = process.env.HOME;
+if (typeof home == 'undefined') {
+    console.log ("HOME not defined: %s", home);
+    return 1;
+}
+loc = home + "/hamon/";
 
-if (fs.existsSync('./' + hamonConfig)) {
+const hamonConfig = loc + 'hamon.yml'
+
+if (fs.existsSync(hamonConfig)) {
   //file exists
   logger.info('Configuration file %s exists, parsing ...', hamonConfig)
   try {
