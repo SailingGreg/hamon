@@ -1,11 +1,20 @@
 const knx = require('knx')
-const { workerData } = require('worker_threads')
+const { workerData, parentPort } = require('worker_threads')
 const ets = require('../parsexml')
 const logger = require('./logger')
 const { writeEvents } = require('./db')
 const dnsSync = require('dns-sync')
 
 const { dns, port, config, name } = workerData?.location
+
+// exit if signaled
+parentPort.on("message", (value) => {
+	if (value.exit) {
+	    console.log("doing cleanup for: %s", name);
+	    // connection.close???
+	    process.exit(0);
+	}
+    });
 
 const knxAddr = dnsSync.resolve(dns)
 
@@ -22,7 +31,7 @@ const connection = knx.Connection({
   forceTunneling: true,
   handlers: {
     connected: function () {
-      logger.info('Connected!')
+      logger.info('Connected - %s', name)
       if (inited == false) {
         var tdpga = '0/1/0'
         dp = new knx.Datapoint({ ga: tdpga, dpt: 'DPT9.001' }, connection)
