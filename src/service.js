@@ -12,6 +12,7 @@ let workerLocations = new Map()
 const getDoc = (hamonConfig) => yaml.load(fs.readFileSync(hamonConfig, 'utf8'))
 
 async function ConnectionService(doc) {
+  threads.clear()
   for (location in doc.locations) {
     const loc = doc.locations[location]
     logger.info(`${loc.name} ${loc.dns} ${loc.port}`)
