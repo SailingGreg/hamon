@@ -7,11 +7,13 @@ const dnsSync = require('dns-sync')
 let firstRun = true
 var dnsEntry = ''
 const threads = new Set()
-let workerLocations = new Map()
 
 const getDoc = (hamonConfig) => yaml.load(fs.readFileSync(hamonConfig, 'utf8'))
 
 async function ConnectionService(doc) {
+  for (let worker of threads) {
+    worker.terminate()
+  }
   threads.clear()
   for (location in doc.locations) {
     const loc = doc.locations[location]
@@ -20,7 +22,6 @@ async function ConnectionService(doc) {
     const worker = new Worker('./src/connection.js', {
       workerData: { location: loc }
     })
-    workerLocations.set(loc.name, worker)
     threads.add(worker)
   }
   for (let worker of threads) {
