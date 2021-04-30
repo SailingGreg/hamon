@@ -1,3 +1,11 @@
+/*
+ * File: db.js - database writes
+ *
+ *
+ *
+ *
+ */
+
 const Influx = require('influx')
 const logger = require('./logger')
 
@@ -19,9 +27,13 @@ const influx = new Influx.InfluxDB({
 })
 // write to influxDB
 function writeEvents(evt, src, dest, knxloc, name, type, value) {
-  if (evt != 'GroupValue_Write' && evt != 'GroupValue_Response') return
+  if (evt != 'GroupValue_Write' && evt != 'GroupValue_Response') return;
+
   // define the event type - Write or Response
   var evtType = evt == 'GroupValue_Write' ? 'Write' : 'Response'
+
+  // need to add guard for no DPT definition - where type is undefined
+
   // write to influxDB
   const date = new Date() // this is UTC
   influx
