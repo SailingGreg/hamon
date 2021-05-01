@@ -116,8 +116,9 @@ const influx = new Influx.InfluxDB({
 
 // write to influxDB
 let writeEvents = function (evt, src, dest, knxloc, name, type, value, unit) {
-    if (evt != "GroupValue_Write" && evt != "GroupValue_Response")
+    if (evt != "GroupValue_Write" && evt != "GroupValue_Response") {
 	return;
+    }
 
     // define the event type - Write or Response
     var evtType = (evt == "GroupValue_Write") ? "Write" : "Response";
@@ -204,8 +205,8 @@ var connection = knx.Connection({
     if (groupAddresses.hasOwnProperty(dest)) {
     	ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
 	
-        logger.info(">> %s Event %j -> %j (%s - %s) - %j %s",
-    	    ctime,
+        logger.info(">> %s %s %j -> %j (%s - %s) - %j %s",
+    	    ctime, evt,
  	    src, dest,
             groupAddresses[dest].name,
             groupAddresses[dest].type,
