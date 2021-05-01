@@ -13,7 +13,7 @@ After=multi-user.target
 Environment=HOME=/home/pi
 Type=idle
 
-ExecStart=/usr/bin/node /home/pi/hamon/ha-mon.js
+ExecStart=/usr/bin/node /home/pi/hamon/src/hamon.js
 StandardOutput=file:/home/pi/hamon/hamon.log
 StandardError=file:/home/pi/hamon/hamon.err
 

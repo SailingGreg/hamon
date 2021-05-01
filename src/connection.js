@@ -5,7 +5,7 @@ const logger = require('./logger')
 const { writeEvents } = require('./db')
 const dnsSync = require('dns-sync')
 
-const { dns, port, config, name } = workerData?.location
+const { dns, port, config, name, path } = workerData?.location
 
 // exit if signaled
 parentPort.on("message", (value) => {
@@ -20,7 +20,8 @@ const knxAddr = dnsSync.resolve(dns)
 
 logger.info('KNXnet/IP %s -> %s', dns, knxAddr)
 
-const groupAddresses = ets.parsexml(config) || {}
+//console.log("connection.js %s", path);
+const groupAddresses = ets.parsexml(path + config) || {}
 
 let inited = false
 let dp = '' // the datapoint

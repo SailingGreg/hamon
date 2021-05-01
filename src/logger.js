@@ -8,7 +8,7 @@ const logger = winston.createLogger({
       winston.format.splat(),
       winston.format.simple()
     ),
-    defaultMeta: { service: 'ha-mon' },
+    defaultMeta: { service: 'hamon' },
     transports: [
       //
       // - Write all logs with level `error` and below to `error.log`
@@ -18,7 +18,7 @@ const logger = winston.createLogger({
         filename: 'error.log',
         level: 'error'
       }),
-      new winston.transports.File({ filename: 'combined.log' })
+      new winston.transports.File({ filename: __dirname + "/combined.log" })
     ]
   })
   

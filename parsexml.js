@@ -13,6 +13,7 @@ const dptRegExp = new RegExp('DPS?T\\-(\\d+)(\\-(\\d+))?');
 exports.parsexml = function (knxGadFile ) {
     var addresses = {};
     try {
+	//console.log("parsexml %s", knxGadFile); // debug
         var data = fs.readFileSync(knxGadFile);
         var ets = convert.xml2js(data);
         if (ets.elements.length > 0) {

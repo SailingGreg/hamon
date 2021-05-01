@@ -10,17 +10,19 @@ const threads = new Set()
 
 const getDoc = (hamonConfig) => yaml.load(fs.readFileSync(hamonConfig, 'utf8'));
 
-async function ConnectionService(doc) {
+async function ConnectionService(path, doc) {
   // delete existing workers
   for (let worker of threads) {
     worker.terminate()
   }
   threads.clear()
 
+	//console.log("service.js %s", path);
   for (location in doc.locations) {
     const loc = doc.locations[location]
     logger.info(`Starting: ${loc.name} ${loc.dns} ${loc.port}`)
-    const worker = new Worker('./src/connection.js', {
+    loc["path"] = path; // add path
+    const worker = new Worker(path + './src/connection.js', {
       workerData: { location: loc }
     })
     threads.add(worker)
@@ -46,14 +48,14 @@ async function ConnectionService(doc) {
 }
 
 // main entry
-async function runService(hamonConfig) {
+async function runService(path, hamonConfig) {
   fs.watch(hamonConfig, function (event, filename) {
-    return ConnectionService(getDoc(hamonConfig))
+    return ConnectionService(path, getDoc(hamonConfig))
   })
 
   if (firstRun) {
     firstRun = false
-    return ConnectionService(getDoc(hamonConfig))
+    return ConnectionService(path, getDoc(hamonConfig))
   }
 }
 
