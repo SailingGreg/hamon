@@ -20,7 +20,7 @@ loc = home + "/hamon/";
 
 const hamonConfig = loc + 'hamon.yml'
 
-console.log(Working locations %s %s", __dirname, (process.cwd());
+console.log("Working locations %s %s", __dirname, process.cwd());
 if (fs.existsSync(hamonConfig)) {
   //file exists
   logger.info('Configuration file %s exists, parsing ...', hamonConfig)
