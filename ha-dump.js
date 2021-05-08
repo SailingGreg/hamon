@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /*
  * Simple script to test knx.js and validate connectivity
  * It will list all events exposed on the bus via the KNXnet/IP router
@@ -11,20 +12,41 @@ var knx = require('knx');
 var dnsSync = require('dns-sync');
 const yaml = require('js-yaml');
 const fs   = require('fs');
+const yargs   = require('yargs');
 
-configFile = "hamon.yml";
+configFile = "hamon.yml"; // default configuration file
+
+// parse command line args
+const argv = yargs
+    .command('* <loca>')
+    .option('c', {
+        alias: 'config',
+        description: 'The configuration file',
+        type: 'string',
+	nargs: 1,
+    })
+    .scriptName("ha-dump")
+    .usage("Usage: $0 [-c config-file] location")
+    .argv;
+
+if (argv.config) {
+    //console.log('Optional configuration file specified: %s', argv.config);
+    configFile = argv.config;
+}
+loc = argv.loca; // the location
 
 // check command args
-//console.log(process.argv);
+/*
 var loc = process.argv[2];
 if (loc == undefined || loc == "") {
-    console.log ("usage: %s {location}", process.argv[1]);
+    console.log ("usage: %s [-c {config.yml}] {location}", process.argv[1]);
     return 1;
 }
+*/
 
 // and configuration file
 if (fs.existsSync("./" + configFile)) {
-    console.log ("Using coniguration file %s", configFile);
+    console.log ("Using coniguration file: %s for location: %s", configFile, loc);
 } else {
     console.log ("Configuration file %s doesn't exist", configFile);
     return 1;
