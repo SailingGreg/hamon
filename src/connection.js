@@ -64,8 +64,9 @@ const connection = knx.Connection({
         ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
 
         logger.info(
-          '>> %s Event %j -> %j (%s - %s) - %j %s',
+          '>> %s Event %s %j -> %j (%s - %s) - %j %s',
           ctime,
+	  evt,
           src,
           dest,
           groupAddresses[dest].name,
