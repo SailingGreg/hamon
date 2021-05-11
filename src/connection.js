@@ -64,7 +64,7 @@ const connection = knx.Connection({
         ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
 
         logger.info(
-          '>> %s Event %s %j -> %j (%s - %s) - %j %s',
+          '>> %s Event %s %j -> %j (%s - %s) - %j %s %j',
           ctime,
 	  evt,
           src,
@@ -72,7 +72,8 @@ const connection = knx.Connection({
           groupAddresses[dest].name,
           groupAddresses[dest].type,
           groupAddresses[dest].endpoint.current_value,
-          groupAddresses[dest].unit
+          groupAddresses[dest].unit,
+          typeof(groupAddresses[dest].endpoint.current_value)
         )
         // encode the evt to shorten it - "gw" or "re"
         writeEvents(
