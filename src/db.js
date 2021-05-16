@@ -1,20 +1,31 @@
 /*
  * File: db.js - database writes
  *
+ * code checks for type to ensure only 'numbers' are written to the
+ * default shard otherwise InfluxDB will ignore the write
  *
- *
- *
+ * Also check for undefined type where the DPT is not defined as this
+ * results in an error as the tag is not defined on the write
  */
 
 const Influx = require('influx')
 const logger = require('./logger')
+const dotenv = require('dotenv')
+
+const result = dotenv.config();
+if (result.error) {
+    throw result.error;
+}
 
 // influxDB connection
 const influx = new Influx.InfluxDB({
   host: 'localhost',
-  database: 'hamon',
-  username: 'grafana',
-  password: 'Grafana',
+  database: process.env.DATABASE,
+  username: process.env.USERNAME,
+  password: process.env.PASSWORD,
+  //database: 'hamon',
+  //username: 'grafana',
+  //password: 'Grafana',
   schema: [
     {
       // the database 'table'
@@ -44,22 +55,26 @@ function writeEvents(evt, src, dest, knxloc, name, type, value, unit) {
         var dbvalue = value;
         //logger.info("Object value %s %s (%s) %s", src, dest, type, value);
     } else if (typeof(value) == "boolean") {
-        logger.info("Boolean value %s %s %s", src, dest, value);
+        //logger.info("Boolean value %s %s %s", src, dest, value);
 	if (value == true)
 	    var dbvalue = 1;
 	else
 	    var dbvalue = 0;
 	//value = value == true ? 1 : 0;
-        logger.info("> Boolean value %j %s", dbvalue, typeof(dbvalue));
+        //logger.info("> Boolean value %j %s", dbvalue, typeof(dbvalue));
     } else { // assume "number"
          var dbvalue = value;
     }
     if (typeof(dbvalue) != "number") {
         logger.info("dbvalue %s %s %j %s", src, dest, dbvalue, typeof(dbvalue));
-	//value = value == true ? 1 : 0;
     }
 
-  // need to add guard for no DPT definition - where type is undefined
+    // need to add guard for no DPT definition - where type is undefined
+    if (type == "" || typeof(type) == 'undefined') {
+        //logger.info("Type is not defined (%s) %s", type, typeof(type));
+        return;
+    }
+
 
   // write to influxDB
   const date = new Date() // this is UTC
