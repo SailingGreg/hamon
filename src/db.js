@@ -23,9 +23,6 @@ const influx = new Influx.InfluxDB({
   database: process.env.DATABASE,
   username: process.env.USERNAME,
   password: process.env.PASSWORD,
-  //database: 'hamon',
-  //username: 'grafana',
-  //password: 'Grafana',
   schema: [
     {
       // the database 'table'
