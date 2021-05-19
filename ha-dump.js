@@ -46,7 +46,7 @@ if (loc == undefined || loc == "") {
 
 // and configuration file
 if (fs.existsSync("./" + configFile)) {
-    console.log ("Using coniguration file: %s for location: %s", configFile, loc);
+    console.log ("Using configuration file: %s for location: %s", configFile, loc);
 } else {
     console.log ("Configuration file %s doesn't exist", configFile);
     return 1;
