@@ -34,19 +34,23 @@ const connection = knx.Connection({
     connected: function () {
       logger.info('Connected - %s', name)
       if (inited == false) {
-        var tdpga = '0/1/0'
-        dp = new knx.Datapoint({ ga: tdpga, dpt: 'DPT9.001' }, connection)
+        //var tdpga = '0/1/0'
+        //dp = new knx.Datapoint({ ga: tdpga, dpt: 'DPT9.001' }, connection)
         inited = true
         // need to iterate over the groupAddresses and create the dps
         var cnt = 0
         for (let key in groupAddresses) {
+            // debugging on load
+            //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
           if (groupAddresses.hasOwnProperty(key)) {
+            // how do check if DPT is defined?
+
             // construct dp for the group address
             let dp = new knx.Datapoint(
               { ga: key, dpt: groupAddresses[key].dpt },
               connection
             )
-            //console.log("New dp %j", dp.dpt.subtype.name);
+            //console.log("New dp %d %j, %j", cnt, dp, dp.dpt.subtype.name);
             groupAddresses[key].endpoint = dp
             groupAddresses[key].unit =
               dp.dpt.subtype !== undefined ? dp.dpt.subtype.unit || '' : ''
@@ -76,17 +80,19 @@ const connection = knx.Connection({
           typeof(groupAddresses[dest].endpoint.current_value)
         )
         // encode the evt to shorten it - "gw" or "re"
-        writeEvents(
-          evt,
-          src,
-          dest,
-          //knxnetLoc,
-          name,
-          groupAddresses[dest].name,
-          groupAddresses[dest].type,
-          groupAddresses[dest].endpoint.current_value,
-          groupAddresses[dest].unit
-        )
+        if (groupAddresses[dest].type !== '') { // if type
+            writeEvents(
+              evt,
+              src,
+              dest,
+              //knxnetLoc,
+              name,
+              groupAddresses[dest].name,
+              groupAddresses[dest].type,
+              groupAddresses[dest].endpoint.current_value,
+              groupAddresses[dest].unit
+            )
+        }
       }
     },
     error: function (connstatus) {
