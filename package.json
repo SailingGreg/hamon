@@ -2,10 +2,11 @@
   "dependencies": {
     "dns-sync": "^0.2.1",
     "dotenv": "^9.0.2",
-    "influx": "^5.8.0",
+    "influx": "^5.9.0",
     "js-yaml": "^4.1.0",
     "knx": "^2.3.8",
     "knx.js": "^0.7.4",
+    "mqtt": "^4.2.6",
     "winston": "^3.3.3",
     "xml-js": "^1.6.11",
     "yargs": "^17.0.1"
