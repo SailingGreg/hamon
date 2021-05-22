@@ -1,3 +1,9 @@
+/*
+ * File: service.js - manage the worker threads for locations
+ *
+ *
+ *
+ */
 const fs = require('fs')
 const { Worker } = require('worker_threads')
 const yaml = require('js-yaml')
@@ -47,10 +53,28 @@ async function ConnectionService(path, doc) {
   */
 }
 
+let last_time = 0;
+let d = new Date().getTime();
+
 // main entry
 async function runService(path, hamonConfig) {
   fs.watch(hamonConfig, function (event, filename) {
-    return ConnectionService(path, getDoc(hamonConfig))
+      /*
+       * put a guard in here so resets only if not called with the last
+       * 10 seconds?
+       */
+        d = new Date().getTime(); // refresh time
+        logger.info("runTime %d", d, last_time);
+        if (d > (last_time + (20 * 1000))) {
+            logger.info("Restarting .... %d", (d - last_time));
+        
+            let rs = ConnectionService(path, getDoc(hamonConfig));
+       
+            last_time = d; // note time
+       
+            return rs;
+        }
+    //return ConnectionService(path, getDoc(hamonConfig))
   })
 
   if (firstRun) {
