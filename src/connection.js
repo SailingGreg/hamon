@@ -38,7 +38,8 @@ const connection = knx.Connection({
         //dp = new knx.Datapoint({ ga: tdpga, dpt: 'DPT9.001' }, connection)
         inited = true
         // need to iterate over the groupAddresses and create the dps
-        var cnt = 0
+        var cnt = 0;
+        var udefined = 0;
         for (let key in groupAddresses) {
             // debugging on load
             //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
@@ -46,20 +47,26 @@ const connection = knx.Connection({
             // how do check if DPT is defined?
 
             // construct dp for the group address
+            // note still doing this for undefined DPTs
             let dp = new knx.Datapoint(
-              { ga: key, dpt: groupAddresses[key].dpt },
-              connection
+              { ga: key, dpt: groupAddresses[key].dpt }, connection
             )
             //console.log("New dp %d %j, %j", cnt, dp, dp.dpt.subtype.name);
-            groupAddresses[key].endpoint = dp
-            groupAddresses[key].unit =
-              dp.dpt.subtype !== undefined ? dp.dpt.subtype.unit || '' : ''
-            groupAddresses[key].type =
-              dp.dpt.subtype !== undefined ? dp.dpt.subtype.name || '' : ''
+                groupAddresses[key].endpoint = dp
+                groupAddresses[key].unit =
+                 dp.dpt.subtype !== undefined ? dp.dpt.subtype.unit || '' : ''
+                groupAddresses[key].type =
+                 dp.dpt.subtype !== undefined ? dp.dpt.subtype.name || '' : ''
+
+            // set a guard if dpt is not defined for the key
+            if (groupAddresses[key].dpt == undefined) {
+                groupAddresses[key].type = undefined;
+                udefined = udefined + 1;
+            }
             cnt = cnt + 1
           }
         }
-        logger.info('Processed %j groupAddresses[]: ', cnt)
+        logger.info('Processed %j (%d undefined) groupAddresses[]: ',                                                                           cnt, udefined)
       }
     },
     // on event we get src/dest/value
@@ -80,7 +87,8 @@ const connection = knx.Connection({
           typeof(groupAddresses[dest].endpoint.current_value)
         )
         // encode the evt to shorten it - "gw" or "re"
-        if (groupAddresses[dest].type !== '') { // if type
+        if (groupAddresses[dest].type != undefined 
+                && groupAddresses[dest].type != '') { // if type
             writeEvents(
               evt,
               src,

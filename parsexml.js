@@ -40,6 +40,8 @@ exports.parsexml = function (knxGadFile ) {
                                 }
                             }
   			    // address is the ga
+                            // but this still creates an entry
+                            // if dpt is undefined
                             addresses[subs[k].attributes.Address] = {
                                 "name" : subs[k].attributes.Name,
                                 "dpt" : dpt,
