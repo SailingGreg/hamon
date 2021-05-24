@@ -26,8 +26,9 @@ async function ConnectionService(path, doc) {
 	//console.log("service.js %s", path);
   for (location in doc.locations) {
     const loc = doc.locations[location]
-    logger.info(`Starting: ${loc.name} ${loc.dns} ${loc.port}`)
+    logger.info(`Starting: ${loc.name} ${loc.dns} ${loc.port} ${loc.device}`)
     loc["path"] = path; // add path
+    //loc["device"] = device;
     const worker = new Worker(path + './src/connection.js', {
       workerData: { location: loc }
     })

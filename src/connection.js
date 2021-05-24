@@ -5,7 +5,8 @@ const logger = require('./logger')
 const { writeEvents } = require('./db')
 const dnsSync = require('dns-sync')
 
-const { dns, port, config, name, path } = workerData?.location
+// added device so switch can be appropriate
+const { dns, port, config, name, path, device } = workerData?.location
 
 // exit if signaled
 parentPort.on("message", (value) => {
@@ -29,7 +30,9 @@ let dp = '' // the datapoint
 const connection = knx.Connection({
   ipAddr: knxAddr,
   ipPort: port,
-  forceTunneling: true,
+  // these set based on device type
+  forceTunneling: device == "genric" ? true : false,
+  suppress_ack_ldatareq: device == "loxone" ? true : false,
   handlers: {
     connected: function () {
       logger.info('Connected - %s', name)
