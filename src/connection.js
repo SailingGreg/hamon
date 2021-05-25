@@ -107,7 +107,8 @@ const connection = knx.Connection({
       }
     },
     error: function (connstatus) {
-      logger.error('**** ERROR: %j', connstatus)
+        ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
+      logger.error('%s **** ERROR: %s %j', ctime, name, connstatus)
     }
   }
 })
