@@ -52,8 +52,18 @@ mqttClient.on('message', function (topic, message) {
                     groupAddresses[gad].endpoint.write(msg);
                 } catch (err) {
                     logger.error('Could not write message %j to group address %s, err: %s', parsedMessage, gad, err);
-            } else { // read
+            } else f (cmd == 'read') { // read
                     groupAddresses[gad].endpoint.read();
+            } else if (cmd == 'on') {
+                //check if on is okay and then action
+                // if (type == DPT_Switch ) 
+                groupAddresses[gad].endpoint.switchOn();
+            } else if (cmd == 'off') {
+                //check if off is okay and then action
+                // if (type == DPT_Switch ) 
+                groupAddresses[gad].endpoint.switchOff();
+            } else {
+                logger.info("Invalid command %s", cmd);
             }
         }
         */
