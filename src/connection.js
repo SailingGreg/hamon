@@ -6,7 +6,7 @@ const { writeEvents } = require('./db')
 const dnsSync = require('dns-sync')
 
 // added device so switch can be appropriate
-const { dns, port, config, name, path, device } = workerData?.location
+const { dns, port, config, name, path, logging, device } = workerData?.location
 
 // exit if signaled
 parentPort.on("message", (value) => {
@@ -24,6 +24,8 @@ logger.info('KNXnet/IP %s -> %s', dns, knxAddr)
 //console.log("connection.js %s", path);
 const groupAddresses = ets.parsexml(path + config) || {}
 
+let last_err = new Date().getTime(); // time
+let ld = 0;
 let inited = false
 let dp = '' // the datapoint
 // and create connection
@@ -33,12 +35,14 @@ const connection = knx.Connection({
   // these set based on device type
   forceTunneling: device == "genric" ? true : false,
   suppress_ack_ldatareq: device == "loxone" ? true : false,
+  loglevel: logging,
   handlers: {
     connected: function () {
-      logger.info('Connected - %s', name)
-      if (inited == false) {
-        //var tdpga = '0/1/0'
-        //dp = new knx.Datapoint({ ga: tdpga, dpt: 'DPT9.001' }, connection)
+        ld = new Date().getTime(); // time
+        ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
+        logger.info('%s Connected - %s (%d)', ctime, name, ld - last_err);
+
+        if (inited == false) {
         inited = true
         // need to iterate over the groupAddresses and create the dps
         var cnt = 0;
@@ -107,8 +111,9 @@ const connection = knx.Connection({
       }
     },
     error: function (connstatus) {
-        ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
-      logger.error('%s **** ERROR: %s %j', ctime, name, connstatus)
+        last_err = new Date().getTime(); // note the time
+        ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
+      logger.error('%s **** ERROR: %s %j', ctime, name, connstatus);
     }
   }
 })
