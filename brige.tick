@@ -1,0 +1,21 @@
+// sets the database and retention policy
+dbrp "hamon"."autogen"
+// var True = true
+stream
+// Select the knx measurement from the hamon database.
+|from()
+.measurement('knx2')
+.where(lambda: "location" == 'sandown' AND "name" == 'Status - AC -Internal temperature - AC06 Master Bed')
+// Triggers a critical alert when the value is greater than 45
+|alert()
+// the label
+.id('HAMON/{{ index .Tags "location" }}')
+.warn(lambda: int("value") > 23)
+.crit(lambda: int("value") > 23)
+// format message
+.message('{{ index .Fields "value"}}')
+// .message('{{.ID}} The humidity in {{ index .Tags "name" }} is {{ index .Fields "value" }} [{{index .Tags "location"}}:{{ index .Tags "source" }}:{{ index .Tags "groupaddr" }}] {{.Level}}' )
+.log('/tmp/alerts.log')
+// .mqtt('{{.ID}}')
+.mqtt('knx/{{ index .Tags "location"}}/{{ index .Tags "groupaddr" }}/write/{{ index .Tags "source" }}/{{ index .Tags "type" }}')
+.retained(TRUE)
