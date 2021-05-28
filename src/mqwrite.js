@@ -23,13 +23,12 @@ function MQTTconnect(groupAddresses, connection, location) {
     if (topic.startsWith('knx')) {
       let gadArray = gadRegExp.exec(topic)
       if (!gadArray) return
-      //console.log('gadArray', gadArray)
+ 
       let gad = gadArray[2] + '/' + gadArray[3] + '/' + gadArray[4]
       let cmd = gadArray[6]
-      console.log('gad', gad)
-      console.log('cmd', cmd)
+
       if (groupAddresses.hasOwnProperty(gad)) {
-        console.log('has?')
+
         if (cmd == 'write') {
           // check value?
           try {
