@@ -4,10 +4,9 @@ const ets = require('../parsexml')
 const logger = require('./logger')
 const { writeEvents } = require('./db')
 const dnsSync = require('dns-sync')
-
+const { MQTTconnect } = require('./mqwrite')
 // added device so switch can be appropriate
 const { dns, port, config, name, path, logging, device } = workerData?.location
-
 // exit if signaled
 parentPort.on("message", (value) => {
 	if (value.exit) {
@@ -87,6 +86,7 @@ const connection = knx.Connection({
             cnt = cnt + 1
           }
         }
+        MQTTconnect(groupAddresses, connection, workerData?.location)
         logger.info('Processed %j (%d undefined) groupAddresses[]: ',                                                                           cnt, udefined)
       }
     },
@@ -98,7 +98,7 @@ const connection = knx.Connection({
         logger.info(
           '>> %s Event %s %j -> %j (%s - %s) - %j %s %j',
           ctime,
-	  evt,
+	        evt,
           src,
           dest,
           groupAddresses[dest].name,
