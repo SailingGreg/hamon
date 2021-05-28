@@ -17,6 +17,14 @@ parentPort.on("message", (value) => {
 	}
     });
 
+function handleTimeout() {
+    let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
+    logger.info('%s Timer: connection timed out', ctime);
+    //process.exit(1);
+}
+
+var timerHandle = null; // the link for the timer
+
 const knxAddr = dnsSync.resolve(dns)
 
 logger.info('KNXnet/IP %s -> %s', dns, knxAddr)
@@ -41,6 +49,12 @@ const connection = knx.Connection({
         ld = new Date().getTime(); // time
         ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
         logger.info('%s Connected - %s (%d)', ctime, name, ld - last_err);
+
+        if (timerHandle != null) {
+            clearTimeout(timerHandle);
+            timerHandle = null; // nulled as clear does not change it!
+            logger.info('%s Timer: clear timer', ctime);
+        }
 
         if (inited == false) {
         inited = true
@@ -113,7 +127,10 @@ const connection = knx.Connection({
     error: function (connstatus) {
         last_err = new Date().getTime(); // note the time
         ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
-      logger.error('%s **** ERROR: %s %j', ctime, name, connstatus);
+        logger.error('%s **** ERROR: %s %j', ctime, name, connstatus);
+
+        // set timer for 10 secs for testing
+        timerHandle = setTimeout (() => handleTimeout(), 10 * 1000);
     }
   }
 })
