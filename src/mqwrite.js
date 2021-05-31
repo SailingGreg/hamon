@@ -13,7 +13,7 @@ function MQTTconnect(groupAddresses, connection, location) {
 
   mqttClient.on('connect', function () {
     console.log(`MQTT connected to ${location?.name}`)
-    mqttClient.subscribe(`${topicPrefix}/${location.name}/+/+/+`) // that is everything
+    mqttClient.subscribe(`${topicPrefix}/${location.name}/+/+/+`)
     mqttClient.subscribe(`${topicPrefix}/${location.name}/+/+/+/+`)
   })
 
@@ -44,7 +44,9 @@ function MQTTconnect(groupAddresses, connection, location) {
           }
         } else if (cmd == 'read') {
           // read
-          groupAddresses[gad].endpoint.read()
+            console.log(`read topic: ${topic}, message: ${msg}`)
+            groupAddresses[gad].endpoint.read()
+            //connection.read(gad);
         } else if (cmd == 'on') {
           //check if on is okay and then action
           // if (type == DPT_Switch )

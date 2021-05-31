@@ -16,6 +16,42 @@ const threads = new Set()
 
 const getDoc = (hamonConfig) => yaml.load(fs.readFileSync(hamonConfig, 'utf8'));
 
+let sigcnt = 0;
+// deal with signals and exit gracefully
+function sigHandler(signal) {
+    console.log(`Caught interrupt ${signal}`);
+
+    sigcnt++;
+    if (sigcnt > 1) // use this to ensure abort
+        process.exit(1);
+
+    // signal threads to exit
+    for (let worker of threads) {
+        //console.log("exiting threads");
+        worker.postMessage({ exit: true });
+    }
+
+    // guard as we need to wait for threads to exit
+    if (threads.size > 0) {
+        // and we set a timer in case systemd only does a SIGTERM
+        let timeout = 250 * threads.size; // 250msec per worker
+        console.log(`Threads outstanding ${threads.size}, setting timeout`)
+        setTimeout (() => {
+            console.log(`Timeout and exiting`)
+            process.exit()
+        }, timeout);
+    } else {
+        console.log(`Exiting`)
+        process.exit();
+    }
+}
+
+// handle CTRL-C, SIGTERM and SIGHUP from systemd
+process.on('SIGINT', sigHandler);
+process.on('SIGTERM', sigHandler);
+process.on('SIGHUP', sigHandler);
+
+
 async function ConnectionService(path, doc) {
   // delete existing workers
   for (let worker of threads) {

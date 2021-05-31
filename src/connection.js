@@ -6,12 +6,14 @@ const { writeEvents } = require('./db')
 const dnsSync = require('dns-sync')
 const { MQTTconnect } = require('./mqwrite')
 // added device so switch can be appropriate
-const { dns, port, config, name, path, logging, device } = workerData?.location
+const { dns, port, config, name, path, logging, device, phyAddr } = workerData?.location
+
 // exit if signaled
 parentPort.on("message", (value) => {
 	if (value.exit) {
-	    console.log("doing cleanup for: %s", name);
-	    // connection.close???
+	    logger.info("Exiting - doing cleanup for: %s", name);
+	    // tidyup
+            connection.Disconnect();
 	    process.exit(0);
 	}
     });
@@ -19,6 +21,7 @@ parentPort.on("message", (value) => {
 function handleTimeout() {
     let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
     logger.info('%s Timer: connection timed out', ctime);
+    // connection.Disconnect();
     //process.exit(1);
 }
 
@@ -41,7 +44,8 @@ const connection = knx.Connection({
   ipPort: port,
   // these set based on device type
   forceTunneling: device == "genric" ? true : false,
-  suppress_ack_ldatareq: device == "loxone" ? true : false,
+  suppress_ack_ldatareq: (device == "loxone" || device == "eibport") ? true : false,
+  physAddr: phyAddr,
   loglevel: logging,
   handlers: {
     connected: function () {
@@ -52,7 +56,7 @@ const connection = knx.Connection({
         if (timerHandle != null) {
             clearTimeout(timerHandle);
             timerHandle = null; // nulled as clear does not change it!
-            logger.info('%s Timer: clear timer', ctime);
+            logger.info('%s Timer: clear timer %s', ctime, name);
         }
 
         if (inited == false) {
@@ -129,8 +133,8 @@ const connection = knx.Connection({
         ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
         logger.error('%s **** ERROR: %s %j', ctime, name, connstatus);
 
-        // set timer for 10 secs for testing
-        timerHandle = setTimeout (() => handleTimeout(), 10 * 1000);
+        // set timer for 5 mins for testing
+        timerHandle = setTimeout (() => handleTimeout(), 300 * 1000);
     }
   }
 })
