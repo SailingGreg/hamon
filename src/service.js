@@ -34,7 +34,7 @@ function sigHandler(signal) {
     // guard as we need to wait for threads to exit
     if (threads.size > 0) {
         // and we set a timer in case systemd only does a SIGTERM
-        let timeout = 250 * threads.size; // 250msec per worker
+        let timeout = 350 * threads.size; // 250msec per worker
         console.log(`Threads outstanding ${threads.size}, setting timeout`)
         setTimeout (() => {
             console.log(`Timeout and exiting`)
