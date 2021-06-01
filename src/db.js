@@ -42,7 +42,7 @@ function writeEvents(evt, src, dest, knxloc, name, type, value, unit) {
 
     // You cannot write fields of different types into the same measurement
     // within the same shard. If you do that, the points will be dropped.
-    // - so convert to integer/float balsed on the current shard
+    // - so convert to integer/float so consisten with the current shard
     if (typeof(value) == "object") {
         if (type == "DPT_TimeOfDay") { // convert to julian
             //logger.info("DPT_TimeOfDay (%s) %s", type, value);
@@ -102,4 +102,52 @@ function writeEvents(evt, src, dest, knxloc, name, type, value, unit) {
     })
 }
 
+
+// for actions
+const influx2 = new Influx.InfluxDB({
+  host: 'localhost',
+  database: process.env.DATABASE,
+  username: process.env.USERNAME,
+  password: process.env.PASSWORD,
+  schema: [
+    {
+      // the database 'table'
+      measurement: 'actions',
+      // we have INTEGER, FLOAT, STRING & BOOLEAN,
+      fields: { value: Influx.FieldType.FLOAT },
+      tags: ['location', 'event', 'groupaddr']
+    }
+  ]
+})
+
+// write for actions
+function writeActions(knxloc, evt, dest, avalue) {
+
+  const date = new Date() // this is UTC
+  influx
+    .writePoints(
+      [
+        {
+          measurement: 'actions',
+          tags: {
+            location: knxloc, // locations
+            event: evt, // read or write in this case
+            groupaddr: dest // targeted gad
+          },
+          fields: { value: avalue },
+          timestamp: date
+        }
+      ],
+      {
+        database: 'hamon',
+        precision: 'ms'
+      }
+    )
+    .catch((error) => {
+      logger.error(`Error saving data to InfluxDB actions! ${error.stack}`)
+    })
+}
+
+
 module.exports.writeEvents = writeEvents
+module.exports.writeActions = writeActions

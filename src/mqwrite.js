@@ -11,7 +11,7 @@ const gadRegExp = new RegExp(
 function MQTTconnect(groupAddresses, connection, location) {
   let mqttClient = mqtt.connect(MQTTBROKERIP)
 
-  mqttClient.on('connect', function () {
+    mqttClient.on('connect', function () {
     console.log(`MQTT connected to ${location?.name}`)
     mqttClient.subscribe(`${topicPrefix}/${location.name}/+/+/+`)
     mqttClient.subscribe(`${topicPrefix}/${location.name}/+/+/+/+`)
@@ -19,6 +19,10 @@ function MQTTconnect(groupAddresses, connection, location) {
 
   mqttClient.on('message', function (topic, message) {
     let msg = message.toString('utf8')
+
+    // ensure value in shard consistent
+    if ((typeof msg === 'string') && (msg.lenght == 0)) msg = 0;
+
     console.log(`Topic: ${topic}, message: ${msg}`)
     if (topic.startsWith('knx')) {
       let gadArray = gadRegExp.exec(topic)
@@ -28,6 +32,11 @@ function MQTTconnect(groupAddresses, connection, location) {
       let cmd = gadArray[6]
 
       if (groupAddresses.hasOwnProperty(gad)) {
+
+        // log the actions - loc, type, target and 'value'
+        //console.log(`logging: ${msg}`)
+        //writeActions(location.name, cmd, gad, msg);
+        //console.log(`Logged ${msg}`)
 
         if (cmd == 'write') {
           // check value?

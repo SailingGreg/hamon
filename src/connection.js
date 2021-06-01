@@ -2,7 +2,7 @@ const knx = require('knx')
 const { workerData, parentPort } = require('worker_threads')
 const ets = require('../parsexml')
 const logger = require('./logger')
-const { writeEvents } = require('./db')
+const { writeEvents, writeActions } = require('./db')
 const dnsSync = require('dns-sync')
 const { MQTTconnect } = require('./mqwrite')
 // added device so switch can be appropriate
@@ -14,6 +14,8 @@ parentPort.on("message", (value) => {
 	    logger.info("Exiting - doing cleanup for: %s", name);
 	    // tidyup
             connection.Disconnect();
+            // should also tidyup MQTT thread
+            // mqttclient.disconnect();
 	    process.exit(0);
 	}
     });
