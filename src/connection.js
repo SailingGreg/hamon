@@ -2,7 +2,7 @@ const knx = require('knx')
 const { workerData, parentPort } = require('worker_threads')
 const ets = require('../parsexml')
 const logger = require('./logger')
-const { writeEvents, writeActions } = require('./db')
+const { writeEvents } = require('./db')
 const dnsSync = require('dns-sync')
 const { MQTTconnect } = require('./mqwrite')
 // added device so switch can be appropriate

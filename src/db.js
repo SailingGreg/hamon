@@ -148,6 +148,6 @@ function writeActions(knxloc, evt, dest, avalue) {
     })
 }
 
-
-module.exports.writeEvents = writeEvents
-module.exports.writeActions = writeActions
+// changed to exports as there is more than one function
+exports.writeEvents = writeEvents
+exports.writeActions = writeActions

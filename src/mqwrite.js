@@ -1,5 +1,6 @@
 const mqtt = require('mqtt') // added to package.jso
 const logger = require('./logger')
+const { writeActions } = require('./db')
 
 const MQTTBROKERIP = 'mqtt://localhost' // needs protocol which is mqtt
 const MQTTBROKERPORT = 1883 // default
@@ -20,10 +21,14 @@ function MQTTconnect(groupAddresses, connection, location) {
   mqttClient.on('message', function (topic, message) {
     let msg = message.toString('utf8')
 
-    // ensure value in shard consistent
-    if ((typeof msg === 'string') && (msg.lenght == 0)) msg = 0;
+    logger.info(`MQTT Topic: ${topic}, message: <${msg}>`)
+    // ensure value in shard is consistent and decimal
+    if (typeof msg === 'string')
+        if (msg.length == 0)
+            msg = 0
+        else
+            msg = parseInt(msg)
 
-    console.log(`Topic: ${topic}, message: ${msg}`)
     if (topic.startsWith('knx')) {
       let gadArray = gadRegExp.exec(topic)
       if (!gadArray) return
@@ -34,9 +39,7 @@ function MQTTconnect(groupAddresses, connection, location) {
       if (groupAddresses.hasOwnProperty(gad)) {
 
         // log the actions - loc, type, target and 'value'
-        //console.log(`logging: ${msg}`)
-        //writeActions(location.name, cmd, gad, msg);
-        //console.log(`Logged ${msg}`)
+        writeActions(location.name, cmd, gad, msg);
 
         if (cmd == 'write') {
           // check value?
@@ -52,8 +55,7 @@ function MQTTconnect(groupAddresses, connection, location) {
             )
           }
         } else if (cmd == 'read') {
-          // read
-            console.log(`read topic: ${topic}, message: ${msg}`)
+            //console.log(`read topic: ${topic}, message: ${msg}`)
             groupAddresses[gad].endpoint.read()
             //connection.read(gad);
         } else if (cmd == 'on') {
