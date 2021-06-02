@@ -9,8 +9,10 @@ const gadRegExp = new RegExp(
   topicPrefix + '/(\\w+)/(\\d+)/(\\d+)/(\\d+)(/([\\w\\d]+))?'
 )
 
+let mqttClient = null; // rescope so available to disconnect
 function MQTTconnect(groupAddresses, connection, location) {
-  let mqttClient = mqtt.connect(MQTTBROKERIP)
+  //let mqttClient = mqtt.connect(MQTTBROKERIP)
+  mqttClient = mqtt.connect(MQTTBROKERIP)
 
     mqttClient.on('connect', function () {
     console.log(`MQTT connected to ${location?.name}`)
@@ -72,6 +74,17 @@ function MQTTconnect(groupAddresses, connection, location) {
       }
     }
   })
+
+
 }
 
-module.exports.MQTTconnect = MQTTconnect
+// added to do the tidyup - note used end() and not the more common disconnect
+function mqdisconnect () {
+    //console.log("calling mqtt disconnect");
+    mqttClient.end();
+    //mqttClient.disconnect();
+}
+
+//module.exports.MQTTconnect = MQTTconnect
+exports.MQTTconnect = MQTTconnect
+exports.mqdisconnect = mqdisconnect

@@ -4,7 +4,7 @@ const ets = require('../parsexml')
 const logger = require('./logger')
 const { writeEvents } = require('./db')
 const dnsSync = require('dns-sync')
-const { MQTTconnect } = require('./mqwrite')
+const { MQTTconnect, mqdisconnect } = require('./mqwrite')
 // added device so switch can be appropriate
 const { dns, port, config, name, path, logging, device, phyAddr } = workerData?.location
 
@@ -15,7 +15,7 @@ parentPort.on("message", (value) => {
 	    // tidyup
             connection.Disconnect();
             // should also tidyup MQTT thread
-            // mqttclient.disconnect();
+            mqdisconnect();
 	    process.exit(0);
 	}
     });
