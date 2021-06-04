@@ -68,16 +68,22 @@ const connection = knx.Connection({
         var udefined = 0;
         for (let key in groupAddresses) {
             // debugging on load
-            //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
           if (groupAddresses.hasOwnProperty(key)) {
             // how do check if DPT is defined?
 
+            //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
+              // add default subtype if not defined
+              if (groupAddresses[key].dpt == "DPT1")
+                groupAddresses[key].dpt = groupAddresses[key].dpt + ".001"
             // construct dp for the group address
             // note still doing this for undefined DPTs
             let dp = new knx.Datapoint(
               { ga: key, dpt: groupAddresses[key].dpt }, connection
             )
-            //console.log("New dp %d %j, %j", cnt, dp, dp.dpt.subtype.name);
+              //if (groupAddresses[key].dpt == "DPT1.001")
+                //console.log("The dp is %j", dp.dpt);
+                //console.log("New dp %d %j, %j", cnt, dp, dp.dpt.subtype.name);
+
                 groupAddresses[key].endpoint = dp
                 groupAddresses[key].unit =
                  dp.dpt.subtype !== undefined ? dp.dpt.subtype.unit || '' : ''
