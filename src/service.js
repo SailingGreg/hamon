@@ -19,7 +19,8 @@ const getDoc = (hamonConfig) => yaml.load(fs.readFileSync(hamonConfig, 'utf8'));
 let sigcnt = 0;
 // deal with signals and exit gracefully
 function sigHandler(signal) {
-    console.log(`Caught interrupt ${signal}`);
+    ttype = typeof signal;
+    console.log(`Caught interrupt ${signal} ${ttype}`);
 
     sigcnt++;
     if (sigcnt > 1) // use this to ensure abort
@@ -55,7 +56,9 @@ process.on('SIGHUP', sigHandler);
 async function ConnectionService(path, doc) {
   // delete existing workers
   for (let worker of threads) {
-    worker.terminate()
+    // allow the thread to exit
+    worker.postMessage({ exit: true });
+    //worker.terminate()
   }
   threads.clear()
 
