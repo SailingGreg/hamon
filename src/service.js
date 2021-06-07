@@ -22,6 +22,7 @@ function sigHandler(signal) {
     ttype = typeof signal;
     console.log(`Caught interrupt ${signal} ${ttype}`);
 
+    // following is basically redundant with the addition of setTimeout()
     sigcnt++;
     if (sigcnt > 1) // use this to ensure abort
         process.exit(1);
@@ -54,12 +55,14 @@ process.on('SIGHUP', sigHandler);
 
 
 async function ConnectionService(path, doc) {
-  // delete existing workers
+  // exit existing workers
   for (let worker of threads) {
     // allow the thread to exit
     worker.postMessage({ exit: true });
     //worker.terminate()
   }
+  // really need a timeout/wait to ensure all threads exit
+  // that is threads.size reaches 0
   threads.clear()
 
 	//console.log("service.js %s", path);

@@ -75,6 +75,8 @@ const connection = knx.Connection({
               // add default subtype if not defined
               if (groupAddresses[key].dpt == "DPT1")
                 groupAddresses[key].dpt = groupAddresses[key].dpt + ".001"
+              if (groupAddresses[key].dpt == "DPT5")
+                groupAddresses[key].dpt = groupAddresses[key].dpt + ".001"
             // construct dp for the group address
             // note still doing this for undefined DPTs
             let dp = new knx.Datapoint(
