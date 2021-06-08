@@ -81,7 +81,8 @@ function MQTTconnect(groupAddresses, connection, location) {
 // added to do the tidyup - note used end() and not the more common disconnect
 function mqdisconnect () {
     //console.log("calling mqtt disconnect");
-    mqttClient.end();
+    if (mqttClient != null) // check it is connected!
+        mqttClient.end();
     //mqttClient.disconnect();
 }
 
