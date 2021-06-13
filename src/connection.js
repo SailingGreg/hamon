@@ -22,7 +22,8 @@ parentPort.on("message", (value) => {
 
 function handleTimeout() {
     let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
-    logger.info('%s Timer: connection timed out', ctime);
+    // added name so it get picked up
+    logger.info('%s Timer: connection timed out %s', ctime, name);
     // connection.Disconnect();
     //process.exit(1);
 }
@@ -45,6 +46,7 @@ const connection = knx.Connection({
   ipAddr: knxAddr,
   ipPort: port,
   // these set based on device type
+  //forceTunneling: false,
   forceTunneling: device == "genric" ? true : false,
   suppress_ack_ldatareq: (device == "loxone" || device == "eibport") ? true : false,
   physAddr: phyAddr,
