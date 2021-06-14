@@ -22,10 +22,16 @@ parentPort.on("message", (value) => {
 
 function handleTimeout() {
     let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
-    // added name so it get picked up
+    // added name so it gets picked up
     logger.info('%s Timer: connection timed out %s', ctime, name);
-    // connection.Disconnect();
-    //process.exit(1);
+
+    connection.Disconnect();
+    //
+    // pass the 'location' back to the parent for 'restart'
+    parentPort.postMessage( name );
+    //
+    // and then just exit
+    process.exit(1);
 }
 
 var timerHandle = null; // the link for the timer
@@ -102,8 +108,9 @@ const connection = knx.Connection({
             cnt = cnt + 1
           }
         }
-        MQTTconnect(groupAddresses, connection, workerData?.location)
         logger.info('Processed %j (%d undefined) groupAddresses[]: ',                                                                           cnt, udefined)
+        // and then connect to MQTT
+        MQTTconnect(groupAddresses, connection, workerData?.location)
       }
     },
     // on event we get src/dest/value

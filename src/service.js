@@ -53,6 +53,31 @@ process.on('SIGINT', sigHandler);
 process.on('SIGTERM', sigHandler);
 process.on('SIGHUP', sigHandler);
 
+// start/restart the location
+function restart (location) {
+    console.log(`restart: ${location}`);
+    const loc = doc.locations[location]
+    logger.info(`Restarting: ${loc.name} for ${location}`)
+
+    loc["path"] = path; // add path
+    //loc["device"] = device;
+    const worker = new Worker(path + './src/connection.js', {
+      workerData: { location: loc }
+    })
+    threads.add(worker)
+
+    worker.on('error', (err) => {
+      throw err;
+    })
+    worker.on('message', (data) => {
+       restart (data); // pass location
+    });
+    worker.on('exit', () => {
+      threads.delete(worker)
+      console.log(`Thread exiting, ${threads.size} running...`)
+    })
+}
+
 
 async function ConnectionService(path, doc) {
   // exit existing workers
@@ -80,6 +105,9 @@ async function ConnectionService(path, doc) {
     worker.on('error', (err) => {
       throw err
     })
+    worker.on('message', (data) => {
+       restart (data); // pass location
+    });
     worker.on('exit', () => {
       threads.delete(worker)
       console.log(`Thread exiting, ${threads.size} running...`)
