@@ -85,6 +85,12 @@ const connection = knx.Connection({
                     //console.log ("Time entry: ", groupAddresses[key].name);
                     groupAddresses[key].dpt = "DPT10.001"
             }
+            // and handles non define room 'temp'
+            if (groupAddresses[key].dpt == undefined &&
+                    groupAddresses[key].name.includes(" Room temp") ) {
+                    //console.log ("Room temp: ", groupAddresses[key].name);
+                    groupAddresses[key].dpt = "DPT9.001"
+            }
 
             //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
               // add default subtype if not defined
