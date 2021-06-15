@@ -79,6 +79,13 @@ const connection = knx.Connection({
           if (groupAddresses.hasOwnProperty(key)) {
             // how do check if DPT is defined?
 
+            // defines default TIME
+            if (groupAddresses[key].dpt == undefined &&
+                    groupAddresses[key].name.substr(0, 5) == "Time " ) {
+                    //console.log ("Time entry: ", groupAddresses[key].name);
+                    groupAddresses[key].dpt = "DPT10.001"
+            }
+
             //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
               // add default subtype if not defined
               if (groupAddresses[key].dpt == "DPT1")
