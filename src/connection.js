@@ -92,6 +92,12 @@ const connection = knx.Connection({
                     //console.log ("Room temp: ", groupAddresses[key].name);
                     groupAddresses[key].dpt = "DPT9.001"
             }
+            // hack for one more deployment missing a definition
+            if (groupAddresses[key].dpt == undefined &&
+                    groupAddresses[key].name.includes(" Boiler") ) {
+                    //console.log ("Room temp: ", groupAddresses[key].name);
+                    groupAddresses[key].dpt = "DPT1.001"
+            }
 
             //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
               // add default subtype if not defined
