@@ -16,6 +16,7 @@ parentPort.on("message", (value) => {
             connection.Disconnect();
             // should also tidyup MQTT thread
             mqdisconnect();
+
 	    process.exit(0);
 	}
     });
@@ -23,14 +24,17 @@ parentPort.on("message", (value) => {
 function handleTimeout() {
     let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
     // added name so it gets picked up
-    logger.info('%s Timer: connection timed out %s', ctime, name);
+    logger.info('%s >>> Timer connection timed out: %s', ctime, name);
 
+    // disconnect knx and mqtt
     connection.Disconnect();
-    //
+    mqdisconnect();
+
     // pass the 'location' back to the parent for 'restart'
     parentPort.postMessage( name );
-    //
+
     // and then just exit
+    logger.info('%s >>> Worker exiting ... %s', ctime, name);
     process.exit(1);
 }
 
@@ -87,7 +91,7 @@ const connection = knx.Connection({
             }
             if (groupAddresses[key].dpt == undefined &&
                     groupAddresses[key].name.substr(0, 5) == "Date " ) {
-                    //console.log ("Time entry: ", groupAddresses[key].name);
+                    //console.log ("Date entry: ", groupAddresses[key].name);
                     groupAddresses[key].dpt = "DPT11.001"
             }
             // and handles non define room 'temp' - 'Actual temp' also
@@ -97,7 +101,7 @@ const connection = knx.Connection({
                     //console.log ("Room temp: ", groupAddresses[key].name);
                     groupAddresses[key].dpt = "DPT9.001"
             }
-            // hack for one more deployment missing a definition
+            // hack for one more deployment missing definition
             if (groupAddresses[key].dpt == undefined &&
                     groupAddresses[key].name.includes(" Boiler") ) {
                     //console.log ("Room temp: ", groupAddresses[key].name);
@@ -136,6 +140,14 @@ const connection = knx.Connection({
         logger.info('Processed %j (%d undefined) groupAddresses[]: ',                                                                           cnt, udefined)
         // and then connect to MQTT
         MQTTconnect(groupAddresses, connection, workerData?.location)
+
+        // done for network ip change testing
+        /*
+        if (name == "home")  {
+            logger.info('%s >>> Disconnect timer set for: %s', ctime, name);
+            timerHandle = setTimeout (() => handleTimeout(), 180 * 1000);
+        }
+        */
       }
     },
     // on event we get src/dest/value

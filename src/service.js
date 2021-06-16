@@ -53,16 +53,27 @@ process.on('SIGINT', sigHandler);
 process.on('SIGTERM', sigHandler);
 process.on('SIGHUP', sigHandler);
 
-// start/restart the location
-function restart (location) {
-    console.log(`restart: ${location}`);
-    const loc = doc.locations[location]
-    logger.info(`Restarting: ${loc.name} for ${location}`)
+let orgLoc = {};
+let orgDoc = {};
+let orgPath = "";
 
-    loc["path"] = path; // add path
+// start/restart the location
+function restart (name) {
+    console.log(`Restart: ${name}`);
+    //#const loc = orgDoc.locations[location]
+
+    for (location in orgDoc.locations) {
+        loc = orgDoc.locations[location]
+        if (loc.name == name )
+            break;
+    }
+    //loc = orgLoc;
+    logger.info(`Restarting: ${loc.name} - ${name}`)
+
+    loc["path"] = orgPath; // add path
     //loc["device"] = device;
-    const worker = new Worker(path + './src/connection.js', {
-      workerData: { location: loc }
+    const worker = new Worker(orgPath + './src/connection.js', {
+                                    workerData: { location: loc }
     })
     threads.add(worker)
 
@@ -78,8 +89,11 @@ function restart (location) {
     })
 }
 
-
 async function ConnectionService(path, doc) {
+  // note for restart
+  orgDoc = doc;
+  orgPath = path;
+
   // exit existing workers
   for (let worker of threads) {
     // allow the thread to exit
