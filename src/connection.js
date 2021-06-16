@@ -85,6 +85,11 @@ const connection = knx.Connection({
                     //console.log ("Time entry: ", groupAddresses[key].name);
                     groupAddresses[key].dpt = "DPT10.001"
             }
+            if (groupAddresses[key].dpt == undefined &&
+                    groupAddresses[key].name.substr(0, 5) == "Date " ) {
+                    //console.log ("Time entry: ", groupAddresses[key].name);
+                    groupAddresses[key].dpt = "DPT11.001"
+            }
             // and handles non define room 'temp' - 'Actual temp' also
             if (groupAddresses[key].dpt == undefined &&
                     (groupAddresses[key].name.includes(" Room temp") ||
