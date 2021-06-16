@@ -36,7 +36,7 @@ function sigHandler(signal) {
     // guard as we need to wait for threads to exit
     if (threads.size > 0) {
         // and we set a timer in case systemd only does a SIGTERM
-        let timeout = 400 * threads.size; // 400msec per worker
+        let timeout = 450 * threads.size; // 450msec per worker
         console.log(`Threads outstanding ${threads.size}, setting timeout`)
         setTimeout (() => {
             console.log(`Timeout and exiting`)
@@ -154,7 +154,7 @@ async function runService(path, hamonConfig) {
             logger.info("Restarting .... %d", (d - last_time));
         
             let rs = ConnectionService(path, getDoc(hamonConfig));
-       
+      min 
             last_time = d; // note time
        
             return rs;

@@ -189,8 +189,8 @@ const connection = knx.Connection({
         ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
         logger.error('%s **** ERROR: %s %j', ctime, name, connstatus);
 
-        // set timer for 5 mins for testing
-        timerHandle = setTimeout (() => handleTimeout(), 300 * 1000);
+        // set timer for ip changes - changed to 8min based on testing
+        timerHandle = setTimeout (() => handleTimeout(), 480 * 1000);
     }
   }
 })
