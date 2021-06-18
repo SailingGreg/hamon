@@ -107,6 +107,18 @@ const connection = knx.Connection({
                     //console.log ("Room temp: ", groupAddresses[key].name);
                     groupAddresses[key].dpt = "DPT1.001"
             }
+            // falcon fixes
+            if (groupAddresses[key].dpt == undefined &&
+                    groupAddresses[key].name.includes(" Brightness Value") ) {
+                    //console.log ("Room temp: ", groupAddresses[key].name);
+                    groupAddresses[key].dpt = "DPT9.004"
+            }
+            if (groupAddresses[key].dpt == undefined &&
+                    groupAddresses[key].name.includes(" Setpoint Temperature") ) {
+                    //console.log ("Room temp: ", groupAddresses[key].name);
+                    groupAddresses[key].dpt = "DPT9.001"
+            }
+
 
             //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
               // add default subtype if not defined
