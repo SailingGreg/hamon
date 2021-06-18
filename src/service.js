@@ -154,7 +154,6 @@ async function runService(path, hamonConfig) {
             logger.info("Restarting .... %d", (d - last_time));
         
             let rs = ConnectionService(path, getDoc(hamonConfig));
-      min 
             last_time = d; // note time
        
             return rs;
