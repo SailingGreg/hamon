@@ -122,9 +122,11 @@ const connection = knx.Connection({
 
             //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
               // add default subtype if not defined
-              if (groupAddresses[key].dpt == "DPT1")
+            if (groupAddresses[key].dpt == "DPT1")
                 groupAddresses[key].dpt = groupAddresses[key].dpt + ".001"
-              if (groupAddresses[key].dpt == "DPT5")
+            if (groupAddresses[key].dpt == "DPT5")
+                groupAddresses[key].dpt = groupAddresses[key].dpt + ".001"
+            if (groupAddresses[key].dpt == "DPT9")
                 groupAddresses[key].dpt = groupAddresses[key].dpt + ".001"
             // construct dp for the group address
             // note still doing this for undefined DPTs
