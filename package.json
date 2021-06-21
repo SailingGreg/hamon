@@ -19,9 +19,10 @@
   "author": "Greg Brougham <greg.brougham@gmail.com>",
   "license": "MIT",
   "scripts": {
-      "lint": "eslint parsexml.js ./src"
+    "lint": "eslint parsexml.js ./src"
   },
   "devDependencies": {
+    "babel-eslint": "^10.1.0",
     "eslint": "^7.29.0"
   }
 }
