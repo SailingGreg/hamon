@@ -16,7 +16,7 @@ if (typeof home == 'undefined') {
     console.log ("HOME not defined: %s", home);
     return 1;
 }
-loc = home + "/hamon/";
+let loc = home + "/hamon/";
 
 const hamonConfig = loc + 'hamon.yml'
 

@@ -19,13 +19,13 @@ const { dns, port, config, name, path, logging, device, phyAddr } = workerData?.
 // exit if signaled
 parentPort.on("message", (value) => {
 	if (value.exit) {
-	    logger.info("Exiting - doing cleanup for: %s", name);
-	    // tidyup
+            logger.info("Exiting - doing cleanup for: %s", name);
+            // tidyup
             connection.Disconnect();
             // should also tidyup MQTT thread
             mqdisconnect();
 
-	    process.exit(0);
+            process.exit(0);
 	}
     });
 
@@ -56,7 +56,7 @@ logger.info('KNXnet/IP %s -> %s', dns, knxAddr)
 const groupAddresses = ets.parsexml(path + config) || {}
 
 // load str to dtp mappings
-const expanddtp = new strdpt.strtodpt(path);
+const expanddpt = new strdpt.strtodpt(path);
 
 let last_err = new Date().getTime(); // time
 let ld = 0;
@@ -75,7 +75,7 @@ const connection = knx.Connection({
   handlers: {
     connected: function () {
         ld = new Date().getTime(); // time
-        ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
+        let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
         logger.info('%s Connected - %s (%d)', ctime, name, ld - last_err);
 
         if (timerHandle != null) {
@@ -98,7 +98,7 @@ const connection = knx.Connection({
             // map name string to dtp
             if (groupAddresses[key].dpt == undefined) {
                     groupAddresses[key].dpt =
-                                expanddtp(name, groupAddresses[key].name);
+                                expanddpt(name, groupAddresses[key].name);
             }
             */
             // defines default TIME
@@ -185,14 +185,11 @@ const connection = knx.Connection({
     // on event we get src/dest/value
     event: function (evt, src, dest, value) {
       if (groupAddresses.hasOwnProperty(dest)) {
-        ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
+        let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
 
         logger.info(
           '>> %s Event %s %j -> %j (%s - %s) - %j %s %j',
-          ctime,
-	        evt,
-          src,
-          dest,
+          ctime, evt, src, dest,
           groupAddresses[dest].name,
           groupAddresses[dest].type,
           groupAddresses[dest].endpoint.current_value,
@@ -218,7 +215,7 @@ const connection = knx.Connection({
     },
     error: function (connstatus) {
         last_err = new Date().getTime(); // note the time
-        ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
+        let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
         logger.error('%s **** ERROR: %s %j', ctime, name, connstatus);
 
         // set timer for ip changes - changed to 8min based on testing

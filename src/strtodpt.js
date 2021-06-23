@@ -36,20 +36,21 @@ class strtodpt {
             // split the line into array
             let strs = line.replace(/"/g, "").split(",");
 
+            // set 'start' flag
+            //console.log("Parsing %s", strs[1]);
+            if (strs[1].startsWith("^")) {
+                // remove "^"
+                strs[1] = strs[1].substring(1);
+                strs[3] = "1";
+            } else {
+                strs[3] = "0";
+                //let t = this.lines[l][1].substring(1);
+            }
+
             //console.log (strs);
             this.lines[this.cnt++] = strs;
 
         }
-
-        //console.log(this.cnt);
-        /*
-        for (var l = 0; l < this.cnt; l++ ) {
-            //console.log(this.lines[l][0].length);
-            if (this.lines[l][0] == 'morgan')
-                console.log("Match for morgan");
-            console.log("%s, %s, %s", this.lines[l][0], this.lines[l][1], this.lines[l][2]);
-        }
-        */
 
     }
 
@@ -62,14 +63,13 @@ class strtodpt {
             if (loc.length > 0 && this.lines[l][0] != loc)
                 continue;
             //console.log(this.lines[l]);
-            if (this.lines[l][1].startsWith("^")) {
-                //console.log("Starts with ^");
+            if (this.lines[l][3] == "1") {
+                //console.log("Starts with %s check", str);
                 // remove "^"
-                let t = this.lines[l][1].substring(1);
-                if (str.startsWith(t))
+                //let t = this.lines[l][1].substring(1);
+                if (str.startsWith(this.lines[l][1]))
                     return this.lines[l][2];
-            }
-            if (this.lines[l][1].includes(str))
+            } else if (this.lines[l][1].includes(str))
                 return this.lines[l][2];
         }
 
@@ -81,10 +81,10 @@ class strtodpt {
 /*
 let t = new strtodpt("./");
 
-console.log(t.expand("", "Date "));
-console.log(t.expand("morgan", " Boiler"));
-console.log(t.expand("", " Room temp"));
-console.log(t.expand("", " Test undefined"));
+console.log(t.expand("", "Date ") == "DPT11.001" ? true : false);
+console.log(t.expand("morgan", " Boiler") == "DPT1.001" ? true : false);
+console.log(t.expand("", " Room temp") == "DPT9.001" ? true : false);
+console.log(t.expand("", " Test undefined") == undefined ? true : false);
 */
 
 exports.strtodpt = strtodpt;

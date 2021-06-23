@@ -8,7 +8,7 @@ const fs = require('fs')
 const { Worker } = require('worker_threads')
 const yaml = require('js-yaml')
 const logger = require('./logger')
-const dnsSync = require('dns-sync')
+//const dnsSync = require('dns-sync')
 
 let firstRun = true
 //var dnsEntry = ''
@@ -19,7 +19,7 @@ const getDoc = (hamonConfig) => yaml.load(fs.readFileSync(hamonConfig, 'utf8'));
 let sigcnt = 0;
 // deal with signals and exit gracefully
 function sigHandler(signal) {
-    ttype = typeof signal;
+    let ttype = typeof signal;
     console.log(`Caught interrupt ${signal} ${ttype}`);
 
     // following is basically redundant with the addition of setTimeout()
@@ -60,7 +60,7 @@ let orgPath = "";
 // start/restart the location
 function restart (name) {
     console.log(`Restart: ${name}`);
-    //#const loc = orgDoc.locations[location]
+    let loc = [];
 
     for (location in orgDoc.locations) {
         loc = orgDoc.locations[location]

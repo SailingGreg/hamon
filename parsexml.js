@@ -39,7 +39,7 @@ exports.parsexml = function (knxGadFile ) {
                                     dpt = 'DPT' + match[1] + (match[3] !== undefined ? '.' + match[3].padStart(3,0) : '');
                                 }
                             }
-  			    // address is the ga
+                            // address is the ga
                             // but this still creates an entry
                             // if dpt is undefined
                             addresses[subs[k].attributes.Address] = {
