@@ -88,3 +88,4 @@ console.log(t.expand("", " Test undefined"));
 */
 
 exports.strtodpt = strtodpt;
+//export { strtodpt };

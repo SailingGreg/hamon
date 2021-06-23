@@ -1,7 +1,15 @@
+/*
+ * connection.js - handle the connection to the remote device
+ *
+ *
+ *
+ */
+
 const knx = require('knx')
 const { workerData, parentPort } = require('worker_threads')
 const ets = require('../parsexml')
 const logger = require('./logger')
+const strdpt = require('./strtodpt')
 const { writeEvents } = require('./db')
 const dnsSync = require('dns-sync')
 const { MQTTconnect, mqdisconnect } = require('./mqwrite')
@@ -47,6 +55,9 @@ logger.info('KNXnet/IP %s -> %s', dns, knxAddr)
 //console.log("connection.js %s", path);
 const groupAddresses = ets.parsexml(path + config) || {}
 
+// load str to dtp mappings
+const expanddtp = new strdpt.strtodpt(path);
+
 let last_err = new Date().getTime(); // time
 let ld = 0;
 let inited = false
@@ -83,6 +94,13 @@ const connection = knx.Connection({
           if (groupAddresses.hasOwnProperty(key)) {
             // how do check if DPT is defined?
 
+            /*
+            // map name string to dtp
+            if (groupAddresses[key].dpt == undefined) {
+                    groupAddresses[key].dpt =
+                                expanddtp(name, groupAddresses[key].name);
+            }
+            */
             // defines default TIME
             if (groupAddresses[key].dpt == undefined &&
                     groupAddresses[key].name.substr(0, 5) == "Time " ) {
@@ -204,7 +222,9 @@ const connection = knx.Connection({
         logger.error('%s **** ERROR: %s %j', ctime, name, connstatus);
 
         // set timer for ip changes - changed to 8min based on testing
-        timerHandle = setTimeout (() => handleTimeout(), 480 * 1000);
+        // 8min was not long enough for the network to stabilise
+        // so changed to 15min - 15 * 60 -> 900
+        timerHandle = setTimeout (() => handleTimeout(), 900 * 1000);
     }
   }
 })

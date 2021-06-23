@@ -3,7 +3,7 @@ const logger = require('./logger')
 const { writeActions } = require('./db')
 
 const MQTTBROKERIP = 'mqtt://localhost' // needs protocol which is mqtt
-const MQTTBROKERPORT = 1883 // default
+//const MQTTBROKERPORT = 1883 // default
 const topicPrefix = '' || 'knx'
 const gadRegExp = new RegExp(
   topicPrefix + '/(\\w+)/(\\d+)/(\\d+)/(\\d+)(/([\\w\\d]+))?'
