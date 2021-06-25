@@ -6,24 +6,77 @@
 #
 #
 
+import os
 import socket
 import time
+import signal
+import logging
 from datetime import datetime
 from datetime import timedelta
 
 
-hosts = [{ 'dns': "ha-test.pergamentum.com", 'addr': 0, 'time': 0 },
-        { 'dns': "ha-office.dyndns.org", 'addr': 0, 'time': 0 },
-        { 'dns': "ha-foxways.dyndns.org", 'addr': 0, 'time': 0 },
-        { 'dns': "ha-macnamara.dyndns.org", 'addr': 0, 'time': 0 },
-        { 'dns': "greig.dyndns.tv", 'addr': 0, 'time': 0 },
-        { 'dns': "ha-hardisty.dyndns.org", 'addr': 0, 'time': 0 },
-        { 'dns': "bemerton.auto-home.co.uk", 'addr': 0, 'time': 0 },
-        { 'dns': "ha-rimer.dyndns.org", 'addr': 0, 'time': 0 },
-        { 'dns': "69ec.dyndns.org", 'addr': 0, 'time': 0 },
-        { 'dns': "ha-falconwood.dyndns.org", 'addr': 0, 'time': 0 },
-        { 'dns': "alexbrown.dyndns-remote.com", 'addr': 0, 'time': 0 } ]
+fname = "chkdns.txt"
+lname = "chkdns.out"
+hosts = [];
 
+def handleSignal(signalNumber, frame):
+    print('Received:', signalNumber);
+    logging.warning(f"Received signal {signalNumber}, exiting");
+    exit(0);
+
+# end of handle signal
+
+# open and parse the file chkdns.txt based on "." or env path
+def init():
+    global fname;
+    global lname;
+    cnt = 0;
+
+    home = os.environ.get("HOME");
+    if (home != None):
+        fname = home + "/hamon/utils/" + fname;
+        lname = home + "/hamon/utils/" + lname;
+    else:
+        fname = "./" + fname;
+        lname = "./" + lname;
+
+    logging.basicConfig(filename=lname, level=logging.INFO);
+    #logging.basicConfig(filename=lname, encoding='utf-8', level=logging.INFO);
+
+    try:
+        f = open(fname, "r");
+    except:
+        print ("File doesnt't exist", fname);
+
+
+    lines = f.readlines();
+
+    for line in lines:
+        line = line.strip('\n');
+        if (line[0] == '#' or len(line) == 0):
+            continue
+        #print(line);
+        host = {'dns': line, 'addr': 0, 'time': 0}
+        hosts.append(host);
+        cnt = cnt + 1;
+
+    #for host in hosts:
+    #    print(host);
+    return cnt;
+# end of init()
+
+
+# main
+
+# set handlers for interrupts
+signal.signal(signal.SIGHUP, handleSignal);
+signal.signal(signal.SIGINT, handleSignal);
+signal.signal(signal.SIGTERM, handleSignal);
+
+cnt = init();
+
+print (f"Checking for {cnt} locations");
+logging.info(f"Checking for {cnt} locations");
 while (True):
     for host in hosts:
         hostname = host['dns'];
@@ -40,7 +93,8 @@ while (True):
         if (host['addr'] == 0): # add
             now = time.time();
             cdate = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now));
-            print ("Resolved ", host['dns'], addr, cdate);
+            #print ("Resolved ", host['dns'], addr, cdate);
+            logging.info(f"Resolved {host['dns']}, {addr}, {cdate}");
             host['addr'] = addr;
             host['time'] = now;
         elif (host['addr'] != addr): # it has changed
@@ -48,8 +102,10 @@ while (True):
             diff = now - host['time']
             elapsed = str(timedelta(seconds=diff));
             cdate = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now));
-            print("DNS change ", cdate, host['dns'],
-                                        host['addr'], addr, elapsed);
+            #print("DNS change ", cdate, host['dns'],
+                                        #host['addr'], addr, elapsed);
+            logging.warning(f"DNS change {cdate}: {host['dns']}, \
+                                        {host['addr']} -> {addr}, {elapsed}");
             host['addr'] = addr;
             host['time'] = now;
 
