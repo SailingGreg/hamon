@@ -176,8 +176,8 @@ const connection = knx.Connection({
             cnt = cnt + 1
           }
         }
-        logger.info('Processed %j (%d undefined/%d remapped) groupAddresses ',
-                                                cnt, udefined, remapped);
+        logger.info('GA for %s: %j (%d undefined/%d remapped)',
+                                            name, cnt, udefined, remapped);
         // and then connect to MQTT
         MQTTconnect(groupAddresses, connection, workerData?.location)
 
