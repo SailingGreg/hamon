@@ -10,14 +10,14 @@
 const fs = require('fs');
 
 let fname = "dptmappings.txt";
+let lines = [];
+//let cnt = 0;
 
-class strtodpt {
+function loadmapping(loc) {
 
-    lines = {};
-    cnt = 0;
     // initalise - load the mapping strings - dpts = new strtpdpt(loc)
-    constructor (loc) {
-        //this.lines = {};
+    //constructor (loc) {
+        //this.lines = [];
 
         // add try
         console.log(loc + fname);
@@ -41,51 +41,70 @@ class strtodpt {
             if (strs[1].startsWith("^")) {
                 // remove "^"
                 strs[1] = strs[1].substring(1);
-                strs[3] = "1";
+                strs.push("1");
+                //strs[3] = "1";
             } else {
-                strs[3] = "0";
-                //let t = this.lines[l][1].substring(1);
+                strs.push("0");
+                //strs[3] = "0";
             }
 
             //console.log (strs);
-            this.lines[this.cnt++] = strs;
+            lines.push(strs);
+            //cnt++;
 
         }
 
-    }
+        //console.log (this.lines);
+}
 
 
-    // expand str - use if undefined dpt = strtodpt.expand();
-    expand (loc, str) {
+    // mapstr str - use if undefined dpt = strtodpt.mapstr();
+function mapstring (loc, str) {
 
+        //console.log(lines);
         // iterate over the lines
-        for (var l = 0; l < this.cnt; l++ ) {
-            if (loc.length > 0 && this.lines[l][0] != loc)
+        for (let line of lines) {
+
+            // if there a 'scope' validate
+            if (line[0].length > 0 && loc.length > 0 && line[0] != loc)
                 continue;
-            //console.log(this.lines[l]);
-            if (this.lines[l][3] == "1") {
+
+            //console.log(line, str);
+            if (line[3] == "1") {
                 //console.log("Starts with %s check", str);
-                // remove "^"
-                //let t = this.lines[l][1].substring(1);
-                if (str.startsWith(this.lines[l][1]))
-                    return this.lines[l][2];
-            } else if (this.lines[l][1].includes(str))
-                return this.lines[l][2];
+                if (str.startsWith(line[1])) {
+                    //console.log ("Match start: ", line[2]);
+                    return line[2];
+                }
+            //} else if (line[1].includes(str)) {
+            } else {
+                //console.log("Includes %s check", str);
+                if (str.includes(line[1])) {
+                    //console.log ("Match includes: ", line[2]);
+                    return line[2];
+                }
+            }
         }
 
         return undefined;
-    }
-
 }
 
-/*
-let t = new strtodpt("./");
 
-console.log(t.expand("", "Date ") == "DPT11.001" ? true : false);
-console.log(t.expand("morgan", " Boiler") == "DPT1.001" ? true : false);
-console.log(t.expand("", " Room temp") == "DPT9.001" ? true : false);
-console.log(t.expand("", " Test undefined") == undefined ? true : false);
+
+/*
+//let t = new strtodpt("./");
+//let t = new strtodpt("./");
+loadmapping("./");
+
+console.log(mapstring("", "Date XX") == "DPT11.001" ? true : false);
+console.log(mapstring("morgan", "XX Boiler") == "DPT1.001" ? true : false);
+console.log(mapstring("", "XX Room temp") == "DPT9.001" ? true : false);
+console.log(mapstring("", " Test undefined") == undefined ? true : false);
 */
 
-exports.strtodpt = strtodpt;
+
+
+module.exports.mapstring = mapstring;
+module.exports.loadmapping = loadmapping;
+//exports.strtodpt = strtodpt;
 //export { strtodpt };

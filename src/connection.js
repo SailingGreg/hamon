@@ -9,10 +9,11 @@ const knx = require('knx')
 const { workerData, parentPort } = require('worker_threads')
 const ets = require('../parsexml')
 const logger = require('./logger')
-const strdpt = require('./strtodpt')
 const { writeEvents } = require('./db')
 const dnsSync = require('dns-sync')
 const { MQTTconnect, mqdisconnect } = require('./mqwrite')
+//const strtodpt = require('./strtodpt')
+const { loadmapping, mapstring } = require('./strtodpt')
 // added device so switch can be appropriate
 const { dns, port, config, name, path, logging, device, phyAddr } = workerData?.location
 
@@ -56,7 +57,9 @@ logger.info('KNXnet/IP %s -> %s', dns, knxAddr)
 const groupAddresses = ets.parsexml(path + config) || {}
 
 // load str to dtp mappings
-const expanddpt = new strdpt.strtodpt(path);
+loadmapping(path); // initialise
+//const mapper = new strtodpt.strtodpt(path);
+//const mapper = new strdpt.strtodpt(path);
 
 let last_err = new Date().getTime(); // time
 let ld = 0;
@@ -84,23 +87,26 @@ const connection = knx.Connection({
             logger.info('%s Timer: clear timer %s', ctime, name);
         }
 
-        if (inited == false) {
-        inited = true
+        if (inited == false) { // only do this once on initial load
+        inited = true;
         // need to iterate over the groupAddresses and create the dps
         var cnt = 0;
         var udefined = 0;
+        let remapped = 0;
         for (let key in groupAddresses) {
             // debugging on load
           if (groupAddresses.hasOwnProperty(key)) {
             // how do check if DPT is defined?
 
-            /*
             // map name string to dtp
             if (groupAddresses[key].dpt == undefined) {
                     groupAddresses[key].dpt =
-                                expanddpt(name, groupAddresses[key].name);
+                            mapstring(name, groupAddresses[key].name);
+                if (groupAddresses[key].dpt != undefined)
+                    remapped++;
             }
-            */
+
+            /*
             // defines default TIME
             if (groupAddresses[key].dpt == undefined &&
                     groupAddresses[key].name.substr(0, 5) == "Time " ) {
@@ -136,6 +142,7 @@ const connection = knx.Connection({
                     //console.log ("Room temp: ", groupAddresses[key].name);
                     groupAddresses[key].dpt = "DPT9.001"
             }
+            */
 
 
             //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
@@ -169,7 +176,8 @@ const connection = knx.Connection({
             cnt = cnt + 1
           }
         }
-        logger.info('Processed %j (%d undefined) groupAddresses[]: ',                                                                           cnt, udefined)
+        logger.info('Processed %j (%d undefined/%d remapped) groupAddresses ',
+                                                cnt, udefined, remapped);
         // and then connect to MQTT
         MQTTconnect(groupAddresses, connection, workerData?.location)
 
