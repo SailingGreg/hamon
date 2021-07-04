@@ -106,44 +106,6 @@ const connection = knx.Connection({
                     remapped++;
             }
 
-            /*
-            // defines default TIME
-            if (groupAddresses[key].dpt == undefined &&
-                    groupAddresses[key].name.substr(0, 5) == "Time " ) {
-                    //console.log ("Time entry: ", groupAddresses[key].name);
-                    groupAddresses[key].dpt = "DPT10.001"
-            }
-            if (groupAddresses[key].dpt == undefined &&
-                    groupAddresses[key].name.substr(0, 5) == "Date " ) {
-                    //console.log ("Date entry: ", groupAddresses[key].name);
-                    groupAddresses[key].dpt = "DPT11.001"
-            }
-            // and handles non define room 'temp' - 'Actual temp' also
-            if (groupAddresses[key].dpt == undefined &&
-                    (groupAddresses[key].name.includes(" Room temp") ||
-                    groupAddresses[key].name.includes(" Actual temp")) ) {
-                    //console.log ("Room temp: ", groupAddresses[key].name);
-                    groupAddresses[key].dpt = "DPT9.001"
-            }
-            // hack for one more deployment missing definition
-            if (groupAddresses[key].dpt == undefined &&
-                    groupAddresses[key].name.includes(" Boiler") ) {
-                    //console.log ("Room temp: ", groupAddresses[key].name);
-                    groupAddresses[key].dpt = "DPT1.001"
-            }
-            // falcon fixes
-            if (groupAddresses[key].dpt == undefined &&
-                    groupAddresses[key].name.includes(" Brightness Value") ) {
-                    //console.log ("Room temp: ", groupAddresses[key].name);
-                    groupAddresses[key].dpt = "DPT9.004"
-            }
-            if (groupAddresses[key].dpt == undefined &&
-                    groupAddresses[key].name.includes(" Setpoint Temperature") ) {
-                    //console.log ("Room temp: ", groupAddresses[key].name);
-                    groupAddresses[key].dpt = "DPT9.001"
-            }
-            */
-
 
             //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
               // add default subtype if not defined
@@ -182,12 +144,10 @@ const connection = knx.Connection({
         MQTTconnect(groupAddresses, connection, workerData?.location)
 
         // done for network ip change testing
-        /*
         if (name == "home")  {
             logger.info('%s >>> Disconnect timer set for: %s', ctime, name);
             timerHandle = setTimeout (() => handleTimeout(), 180 * 1000);
         }
-        */
       }
     },
     // on event we get src/dest/value
