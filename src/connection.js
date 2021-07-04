@@ -143,11 +143,13 @@ const connection = knx.Connection({
         // and then connect to MQTT
         MQTTconnect(groupAddresses, connection, workerData?.location)
 
+        /*
         // done for network ip change testing
         if (name == "home")  {
             logger.info('%s >>> Disconnect timer set for: %s', ctime, name);
             timerHandle = setTimeout (() => handleTimeout(), 180 * 1000);
         }
+        */
       }
     },
     // on event we get src/dest/value
