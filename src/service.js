@@ -105,6 +105,7 @@ function compareLoc(oldLoc, newLoc) {
 
     // do a field by field comparison - but name excluded!
     //if (oldLoc['name'] != newLoc['name']) change = true;
+    if (oldLoc['enabled'] != newLoc['enabled']) change = true;
     if (oldLoc['dns'] != newLoc['dns']) change = true;
     if (oldLoc['port'] != newLoc['port']) change = true;
     if (oldLoc['device'] != newLoc['device']) change = true;
@@ -179,15 +180,19 @@ async function ConnectionService(firstrun, path, doc) {
                 wrk = oldLoc["worker"];
                 //console.log("wrk is null? ", wrk == null);
                 if (wrk != null) {
-                    logger.info("Worker terminating");
+                    logger.info("Existing worker terminating");
                     wrk.postMessage({ exit: true });
                 } else {
                     logger.error("Worker is null - can't terminate");
                 }
 
-                wrk = start_worker(path, loc);
-                loc["worker"] = wrk;
-                //doc.locations[location]["worker"] = wrk;
+                if (loc["enabled"] == true) { // restart
+                    wrk = start_worker(path, loc);
+                    loc["worker"] = wrk;
+                    //doc.locations[location]["worker"] = wrk;
+                } else {
+                    logger.info(`Not restarting: ${loc.name}`)
+                }
 
             } else { // do nothing
                 logger.info(`No change for: ${loc.name}`);
@@ -197,18 +202,23 @@ async function ConnectionService(firstrun, path, doc) {
  
         } else { // new entry in config file
             //start it
-            logger.info(`New entry for: ${loc.name}`)
+            if (loc["enabled"] == true) { // only if enabled
+                logger.info(`New entry for: ${loc.name}`)
+                wrk = start_worker(path, loc);
+                loc["worker"] = wrk;
+                //doc.locations[location]["worker"] = wrk;
+            }
+        }
+
+    } else { // first run so just start it
+        //console.log(loc);
+        if (loc["enabled"] == true) { // only if enabled
+            logger.info(`First run for: ${loc.name}`)
+            // start worker
             wrk = start_worker(path, loc);
             loc["worker"] = wrk;
             //doc.locations[location]["worker"] = wrk;
         }
-
-    } else { // first run so just start it
-        logger.info(`First run for: ${loc.name}`)
-        // start worker
-        wrk = start_worker(path, loc);
-        loc["worker"] = wrk;
-        //doc.locations[location]["worker"] = wrk;
     }
 
     // note the current config file stamp
