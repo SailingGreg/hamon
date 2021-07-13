@@ -8,13 +8,21 @@ var dnsSync = require('dns-sync');
 
 const hamonConfig = "hamon.yml"; // the configuration file - add location
 
+//console.log(process.argv);
+var fileArg = process.argv[2];
+if (fileArg == undefined || fileArg == "") {
+    fileArg = hamonConfig;
+    //console.log ("usage: %s {filename}", process.argv[1]);
+    //return 1;
+}
+
 // check if the config file exists
 try {
-  if (fs.existsSync(hamonConfig)) {
+  if (fs.existsSync(fileArg)) {
     //file exists
-    console.log("Configuration file %s exists, parsing ...", hamonConfig);
+    console.log("Configuration file %s exists, parsing ...", fileArg);
   } else {
-    console.log("Configuration file %s doesn't exist", hamonConfig);
+    console.log("Configuration file %s doesn't exist", fileArg);
     return false;
   }
 } catch(err) {
@@ -23,10 +31,10 @@ try {
 }
 
 
-//console.log("Parsing file %s", hamonConfig);
+//console.log("Parsing file %s", fileArg);
 // Get document, or throw exception on error
 try {
-  const doc = yaml.load(fs.readFileSync('hamon.yml', 'utf8'));
+  const doc = yaml.load(fs.readFileSync(fileArg, 'utf8'));
   //console.log(doc);
 
   //console.log(doc["locations"]);
@@ -49,8 +57,10 @@ try {
 
       // check dns entries
       dnsEntry = install['dns']
+      Enabled = install['enabled']
       etsEntry = install['config']
-      console.log("Checking location %s -> %s", install['name'], dnsEntry);
+      console.log("Checking location %s -> %s, enabled: %s",
+            install['name'], dnsEntry, Enabled == true ? "true" : "false");
       ipaddr = dnsSync.resolve(dnsEntry);
       if (ipaddr != null) {
           console.log("\tEntry resolved to %s", ipaddr);
