@@ -65,6 +65,8 @@ for (deploy in doc["locations"]) {
         knxnetIP = install['dns'];
         knxnetPort = install['port'];
         knxnetXML = install['config'];
+        logging = install['logging'];
+        phyAddr = install['phyAddr'];
     }
 }
 
@@ -87,8 +89,8 @@ var connection = knx.Connection({
   // physAddr: '0.1.0',
   // ensure it tunneling and not operating n hybrid mode
   forceTunneling: true,
-  // the default is info
-  // logLevel: 'debug',
+  physAddr: phyAddr, // from config
+  loglevel: logging,
   handlers: {
     connected: function () {
       console.log('Connected!')
