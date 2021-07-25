@@ -5,6 +5,7 @@
  *
  */
 const fs = require('fs')
+const net = require('net')
 const { Worker } = require('worker_threads')
 const yaml = require('js-yaml')
 const logger = require('./logger')
@@ -232,6 +233,44 @@ let d = new Date().getTime();
 
 // main entry
 async function runService(path, hamonConfig) {
+
+    // setup the named pipe listener
+    var pname = path + '/tmp/kpipe' // the fifo 
+
+    // we open it read/write so the pipe doesn't get closed on EOF
+    fs.open(pname, fs.constants.O_RDWR | fs.constants.O_NONBLOCK, (err, fd) => {
+        // Handle err
+        if (err != null) {
+            console.log("Error opening named pipe");
+            logger.error(`Error open named pipe ${pname}`);
+            process.exit(1);
+        }
+        const pipe = new net.Socket({ fd });
+        // Now `pipe` is a stream that can be used for reading from the FIFO.
+        pipe.on('data', (data) => { // process data ...
+            let ksite = data.toString();
+            if (ksite.length > 1) {
+                ksite = ksite.slice(0, -1); // remove the NL
+                logger.info(`Looking to restart ${ksite}`);
+                // we can call restart(site) but need to terminate first
+                let oldLoc = findLoc(ksite, originalDoc);
+                if (oldLoc != null && (oldLoc["enabled"] == true)) {
+                    wrk = oldLoc["worker"];
+                    //console.log("wrk is null? ", wrk == null);
+                    if (wrk != null) {
+                        logger.info("Terminating existing worker");
+                        wrk.postMessage({ exit: true });
+
+                        // and now restart
+                        restart(ksite);
+                    }
+                } else {
+                    logger.info(`Can't find location ${ksite}`);
+                }
+            }
+        });
+    });
+
   fs.watchFile(hamonConfig, function (curr, present) {
       //console.log("fs.watch: ", event, filename);
       /*
