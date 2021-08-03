@@ -49,7 +49,8 @@ function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit) {
     // within the same shard. If you do that, the points will be dropped.
     // - so convert to integer/float so consisten with the current shard
     if (typeof(value) == "object") {
-        if (type == "DPT_TimeOfDay") { // convert to julian
+        // convert to julian at some future point
+        if (type == "DPT_TimeOfDay" || type == "DPT_Date") {
             //logger.info("DPT_TimeOfDay (%s) %s", type, value);
             return;
 	}
