@@ -15,6 +15,7 @@ let firstRun = true
 //var dnsEntry = ''
 const threads = new Set()
 
+// need to add try/except
 const getDoc = (hamonConfig) => yaml.load(fs.readFileSync(hamonConfig, 'utf8'));
 
 let sigcnt = 0;
@@ -59,9 +60,10 @@ process.on('SIGHUP', sigHandler);
 let originalDoc = {};
 let orgPath = "";
 
-function start_worker(path, loc) {
+function start_worker(path, influxver, loc) {
 
     loc["path"] = path; // add path
+    loc["influxver"] = influxver; // add influxdb version
 
     /*
     // if still link then ensure it is terminated!
@@ -132,7 +134,7 @@ function restart (name) {
     logger.info(`Restarting: ${loc.name} - ${name}`)
 
     // and start it
-    let wrk = start_worker(orgPath, loc);
+    let wrk = start_worker(orgPath, originalDoc.influxdb, loc);
     loc["worker"] = wrk; // and recorded the 'worker'
 
 }
@@ -158,6 +160,7 @@ async function ConnectionService(firstrun, path, doc) {
   threads.clear()
   */
   // iterate over the 'existing' config and see if new or changed
+  //console.log(doc.influxdb)
   for (location in doc.locations) {
     let loc = doc.locations[location]
     logger.info(`Checking: ${loc.name} ${loc.dns} ${loc.port} ${loc.device}`)
@@ -188,7 +191,7 @@ async function ConnectionService(firstrun, path, doc) {
                 }
 
                 if (loc["enabled"] == true) { // restart
-                    wrk = start_worker(path, loc);
+                    wrk = start_worker(path, doc.influxdb, loc);
                     loc["worker"] = wrk;
                     //doc.locations[location]["worker"] = wrk;
                 } else {
@@ -205,7 +208,7 @@ async function ConnectionService(firstrun, path, doc) {
             //start it
             if (loc["enabled"] == true) { // only if enabled
                 logger.info(`New entry for: ${loc.name}`)
-                wrk = start_worker(path, loc);
+                wrk = start_worker(path, doc.influxdb, loc);
                 loc["worker"] = wrk;
                 //doc.locations[location]["worker"] = wrk;
             }
@@ -216,7 +219,7 @@ async function ConnectionService(firstrun, path, doc) {
         if (loc["enabled"] == true) { // only if enabled
             logger.info(`First run for: ${loc.name}`)
             // start worker
-            wrk = start_worker(path, loc);
+            wrk = start_worker(path, doc.influxdb, loc);
             loc["worker"] = wrk;
             //doc.locations[location]["worker"] = wrk;
         }
@@ -255,7 +258,7 @@ async function runService(path, hamonConfig) {
                 // we can call restart(site) but need to terminate first
                 let oldLoc = findLoc(ksite, originalDoc);
                 if (oldLoc != null && (oldLoc["enabled"] == true)) {
-                    wrk = oldLoc["worker"];
+                    let wrk = oldLoc["worker"];
                     //console.log("wrk is null? ", wrk == null);
                     if (wrk != null) {
                         logger.info("Terminating existing worker");

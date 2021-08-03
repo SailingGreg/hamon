@@ -10,12 +10,13 @@ const { workerData, parentPort } = require('worker_threads')
 const ets = require('../parsexml')
 const logger = require('./logger')
 const { writeEvents } = require('./db')
+const { writeEvents2 } = require('./dbv2')
 const dnsSync = require('dns-sync')
 const { MQTTconnect, mqdisconnect } = require('./mqwrite')
 //const strtodpt = require('./strtodpt')
 const { loadmapping, mapstring } = require('./strtodpt')
 // added device so switch can be appropriate
-const { dns, port, config, name, path, logging, device, phyAddr } = workerData?.location
+const { dns, port, config, name, path, influxver, logging, device, phyAddr } = workerData?.location
 
 // exit if signaled
 parentPort.on("message", (value) => {
@@ -157,6 +158,7 @@ const connection = knx.Connection({
       if (groupAddresses.hasOwnProperty(dest)) {
         let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
 
+        // note use of endpoint.current_value gives the 'decoded' value
         logger.info(
           '>> %s Event %s %j -> %j (%s - %s) - %j %s %j',
           ctime, evt, src, dest,
@@ -169,17 +171,32 @@ const connection = knx.Connection({
         // encode the evt to shorten it - "gw" or "re"
         if (groupAddresses[dest].type != undefined 
                 && groupAddresses[dest].type != '') { // if type
-            writeEvents(
-              evt,
-              src,
-              dest,
-              //knxnetLoc,
-              name,
-              groupAddresses[dest].name,
-              groupAddresses[dest].type,
-              groupAddresses[dest].endpoint.current_value,
-              groupAddresses[dest].unit
-            )
+            // bind to influx v1 or v2?
+            if (influxver == 1) {
+                writeEvents(
+                  evt,
+                  src,
+                  dest,
+                  //knxnetLoc,
+                  name,
+                  groupAddresses[dest].name,
+                  groupAddresses[dest].type,
+                  groupAddresses[dest].endpoint.current_value,
+                  groupAddresses[dest].unit
+                )
+            } else {
+                writeEvents2(
+                  evt,
+                  src,
+                  dest,
+                  //knxnetLoc,
+                  name,
+                  groupAddresses[dest].name,
+                  groupAddresses[dest].type,
+                  groupAddresses[dest].endpoint.current_value,
+                  groupAddresses[dest].unit
+                )
+            }
         }
       }
     },

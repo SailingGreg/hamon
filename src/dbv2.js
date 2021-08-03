@@ -8,7 +8,7 @@
  * results in an error as the tag is not defined on the write
  */
 
-const Influx = require('influx')
+const Influxdb = require('influxdb-v2')
 const logger = require('./logger')
 const dotenv = require('dotenv')
 
@@ -18,11 +18,10 @@ if (result.error) {
 }
 
 // influxDB connection
-const influx = new Influx.InfluxDB({
+const influxdb = new Influxdb({
   host: 'localhost',
-  database: process.env.DATABASE,
-  username: process.env.USERNAME,
-  password: process.env.PASSWORD,
+  token: process.env.TOKENPROD,
+  /*
   schema: [
     {
       // the database 'table'
@@ -32,9 +31,11 @@ const influx = new Influx.InfluxDB({
       tags: ['location', 'event', 'source', 'groupaddr', 'name', 'type']
     }
   ]
+  */
 })
+
 // write to influxDB
-function writeEvents(evt, src, dest, knxloc, name, type, value, unit) {
+function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit) {
   if (evt != 'GroupValue_Write' && evt != 'GroupValue_Response') return;
 
     let dbvalue = 0.0;
@@ -77,10 +78,13 @@ function writeEvents(evt, src, dest, knxloc, name, type, value, unit) {
 
   // write to influxDB
   const date = new Date() // this is UTC
-  influx
-    .writePoints(
-      [
+  influxdb.write(
         {
+            org: "HA",
+            //precision: 'ms'
+            bucket: process.env.BUCKET
+        },
+      [ {
           measurement: 'knx2',
           tags: {
             location: knxloc,
@@ -92,12 +96,13 @@ function writeEvents(evt, src, dest, knxloc, name, type, value, unit) {
           },
           fields: { value: dbvalue },
           timestamp: date
-        }
-      ],
+        } ]
+      /*,
       {
         database: 'hamon',
         precision: 'ms'
       }
+      */
     )
     .catch((error) => {
       logger.error(`Error saving data to InfluxDB! ${error.stack}`)
@@ -105,6 +110,7 @@ function writeEvents(evt, src, dest, knxloc, name, type, value, unit) {
 }
 
 
+/*
 // for actions
 const influx2 = new Influx.InfluxDB({
   host: 'localhost',
@@ -121,15 +127,20 @@ const influx2 = new Influx.InfluxDB({
     }
   ]
 })
+*/
 
 // write for actions
-function writeActions(knxloc, evt, dest, avalue) {
+function writeActionsv2(knxloc, evt, dest, avalue) {
 
   const date = new Date() // this is UTC
-  influx
-    .writePoints(
-      [
-        {
+  influxdb.write(
+      {
+            org: "HA",
+            //precision: 'ms',
+            bucket: process.env.BUCKET
+            //database: 'hamon',
+      }
+      [ {
           measurement: 'actions',
           tags: {
             location: knxloc, // locations
@@ -138,12 +149,7 @@ function writeActions(knxloc, evt, dest, avalue) {
           },
           fields: { value: avalue },
           timestamp: date
-        }
-      ],
-      {
-        database: 'hamon',
-        precision: 'ms'
-      }
+        } ]
     )
     .catch((error) => {
       logger.error(`Error saving data to InfluxDB actions! ${error.stack}`)
@@ -151,5 +157,5 @@ function writeActions(knxloc, evt, dest, avalue) {
 }
 
 // changed to exports as there is more than one function
-exports.writeEvents = writeEvents
-exports.writeActions = writeActions
+exports.writeEvents = writeEventsv2
+exports.writeActions = writeActionsv2
