@@ -10,7 +10,7 @@ const { workerData, parentPort } = require('worker_threads')
 const ets = require('../parsexml')
 const logger = require('./logger')
 const { writeEvents } = require('./db')
-const { writeEvents2 } = require('./dbv2')
+const { writeEventsv2 } = require('./dbv2')
 const dnsSync = require('dns-sync')
 const { MQTTconnect, mqdisconnect } = require('./mqwrite')
 //const strtodpt = require('./strtodpt')
@@ -185,7 +185,7 @@ const connection = knx.Connection({
                   groupAddresses[dest].unit
                 )
             } else {
-                writeEvents2(
+                writeEventsv2(
                   evt,
                   src,
                   dest,

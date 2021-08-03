@@ -20,7 +20,9 @@ if (result.error) {
 // influxDB connection
 const influxdb = new Influxdb({
   host: 'localhost',
-  token: process.env.TOKENPROD,
+  protocol: 'http', // added to stop defaulting to https
+  port: 8086, // and port 443!
+  token: process.env.TOKENPROD
   /*
   schema: [
     {
@@ -94,8 +96,8 @@ function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit) {
             name: name,
             type: type
           },
-          fields: { value: dbvalue },
-          timestamp: date
+          fields: { value: dbvalue } //,
+          //timestamp: date
         } ]
       /*,
       {
@@ -157,5 +159,5 @@ function writeActionsv2(knxloc, evt, dest, avalue) {
 }
 
 // changed to exports as there is more than one function
-exports.writeEvents = writeEventsv2
-exports.writeActions = writeActionsv2
+exports.writeEventsv2 = writeEventsv2
+exports.writeActionsv2 = writeActionsv2
