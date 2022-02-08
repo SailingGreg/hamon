@@ -114,7 +114,11 @@ var connection = knx.Connection({
 })
 
 function exitHandler(options) {
-  connection.Disconnect()
+  if(connection.state === 'connected') {
+    connection.Disconnect()
+  } else {
+    if (options.exit) process.exit();
+  }
   connection.on('disconnected', () => {
     if (options.exit) process.exit();
   })
