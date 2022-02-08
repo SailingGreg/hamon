@@ -94,6 +94,11 @@ var connection = knx.Connection({
   handlers: {
     connected: function () {
       console.log('Connected!')
+      // DO THINGS HERE
+      connection.Disconnect()
+      connection.on('disconnected', () => {
+        process.exit(0);
+      })
     },
     event: function (evt, src, dest, value) {
       console.log(
