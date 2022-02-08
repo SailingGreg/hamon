@@ -114,7 +114,6 @@ var connection = knx.Connection({
 })
 
 function exitHandler(options) {
-  console.log('connection.state', connection.state)
   if(connection.state === 'connected' || connection.state === 'idle') {
     console.log('Connection is established while trying to close ha-dump script, disconnecting...')
     connection.Disconnect()
