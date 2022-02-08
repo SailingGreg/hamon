@@ -11,27 +11,27 @@
 var knx = require('knx');
 var dnsSync = require('dns-sync');
 const yaml = require('js-yaml');
-const fs   = require('fs');
-const yargs   = require('yargs');
+const fs = require('fs');
+const yargs = require('yargs');
 
 configFile = "hamon.yml"; // default configuration file
 
 // parse command line args
 const argv = yargs
-    .command('* <loca>')
-    .option('c', {
-        alias: 'config',
-        description: 'The configuration file',
-        type: 'string',
-	nargs: 1,
-    })
-    .scriptName("ha-dump")
-    .usage("Usage: $0 [-c config-file] location")
-    .argv;
+  .command('* <loca>')
+  .option('c', {
+    alias: 'config',
+    description: 'The configuration file',
+    type: 'string',
+    nargs: 1,
+  })
+  .scriptName("ha-dump")
+  .usage("Usage: $0 [-c config-file] location")
+  .argv;
 
 if (argv.config) {
-    //console.log('Optional configuration file specified: %s', argv.config);
-    configFile = argv.config;
+  //console.log('Optional configuration file specified: %s', argv.config);
+  configFile = argv.config;
 }
 loc = argv.loca; // the location
 
@@ -46,10 +46,10 @@ if (loc == undefined || loc == "") {
 
 // and configuration file
 if (fs.existsSync("./" + configFile)) {
-    console.log ("Using configuration file: %s for location: %s", configFile, loc);
+  console.log("Using configuration file: %s for location: %s", configFile, loc);
 } else {
-    console.log ("Configuration file %s doesn't exist", configFile);
-    return 1;
+  console.log("Configuration file %s doesn't exist", configFile);
+  return 1;
 }
 
 // then parse for location
@@ -57,23 +57,23 @@ const doc = yaml.load(fs.readFileSync(configFile, 'utf8'));
 var cnt = 0;
 var knxnetLoc = "";
 for (deploy in doc["locations"]) {
-    cnt = cnt + 1;
-    install = doc["locations"][deploy]
-    console.log("\t %s %s %s %d", deploy, install['name'], install['dns'], install['port']);
-    if (install['name'] == loc) {
-        knxnetLoc = install['name'];
-        knxnetIP = install['dns'];
-        knxnetPort = install['port'];
-        knxnetXML = install['config'];
-        logging = install['logging'];
-        phyAddr = install['phyAddr'];
-    }
+  cnt = cnt + 1;
+  install = doc["locations"][deploy]
+  console.log("\t %s %s %s %d", deploy, install['name'], install['dns'], install['port']);
+  if (install['name'] == loc) {
+    knxnetLoc = install['name'];
+    knxnetIP = install['dns'];
+    knxnetPort = install['port'];
+    knxnetXML = install['config'];
+    logging = install['logging'];
+    phyAddr = install['phyAddr'];
+  }
 }
 
 // check if location found
 if (knxnetLoc == "") {
-    console.log ("Location %s not found", loc);
-    return 1;
+  console.log("Location %s not found", loc);
+  return 1;
 }
 console.log("Dumping %s %s %d (%s)", knxnetLoc, knxnetIP, knxnetPort, knxnetXML);
 // resolve the KNXnet/IP router
@@ -95,10 +95,6 @@ var connection = knx.Connection({
     connected: function () {
       console.log('Connected!')
       // DO THINGS HERE
-      connection.Disconnect()
-      connection.on('disconnected', () => {
-        process.exit(0);
-      })
     },
     event: function (evt, src, dest, value) {
       console.log(
@@ -107,7 +103,7 @@ var connection = knx.Connection({
         evt,
         src,
         dest,
-        value, 
+        value,
         loc
       )
     },
@@ -116,3 +112,23 @@ var connection = knx.Connection({
     }
   }
 })
+
+function exitHandler(options) {
+  connection.Disconnect()
+  connection.on('disconnected', () => {
+    if (options.exit) process.exit();
+  })
+}
+
+//do something when app is closing
+process.on('exit', exitHandler.bind(null, { cleanup: true }));
+
+//catches ctrl+c event
+process.on('SIGINT', exitHandler.bind(null, { exit: true }));
+
+// catches "kill pid" (for example: nodemon restart)
+process.on('SIGUSR1', exitHandler.bind(null, { exit: true }));
+process.on('SIGUSR2', exitHandler.bind(null, { exit: true }));
+
+//catches uncaught exceptions
+process.on('uncaughtException', exitHandler.bind(null, { exit: true }));
