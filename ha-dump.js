@@ -114,18 +114,18 @@ var connection = knx.Connection({
 })
 
 function exitHandler(options) {
-  if(connection.state === 'connected') {
+  console.log('connection.state', connection.state)
+  if(connection.state === 'connected' || connection.state === 'idle') {
+    console.log('Connection is established while trying to close ha-dump script, disconnecting...')
     connection.Disconnect()
+    connection.on('disconnected', () => {
+      console.log('Distonnected, closing ha-dump gracefully.')
+      if (options.exit) process.exit();
+    })
   } else {
     if (options.exit) process.exit();
   }
-  connection.on('disconnected', () => {
-    if (options.exit) process.exit();
-  })
 }
-
-//do something when app is closing
-process.on('exit', exitHandler.bind(null, { cleanup: true }));
 
 //catches ctrl+c event
 process.on('SIGINT', exitHandler.bind(null, { exit: true }));
