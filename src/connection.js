@@ -26,8 +26,10 @@ parentPort.on("message", (value) => {
             connection.Disconnect();
             // should also tidyup MQTT thread
             mqdisconnect();
-
-            process.exit(0);
+            connection.on('disconnected', () => {
+              console.log('Distonnected, closed connection gracefully.')
+              process.exit(0);
+            })
 	}
     });
 
@@ -45,7 +47,10 @@ function handleTimeout() {
 
     // and then just exit
     logger.info('%s >>> Worker exiting ... %s', ctime, name);
-    process.exit(1);
+    connection.on('disconnected', () => {
+      console.log('Closed connection with timeout.')
+      process.exit(1);
+    })
 }
 
 var timerHandle = null; // the link for the timer
