@@ -3,13 +3,13 @@
  It will list all events exposed on the bus via the KNXnet/IP router
 */
 const { workerData } = require('worker_threads')
+const logger = require('./src/logger');
 
 // load knx ip stack
 var knx = require('knx')
 var dnsSync = require('dns-sync')
 
 const { knxnetIP, knxnetPort, name } = workerData
-
 
 // resolve the KNXnet/IP router
 knxnetAddr = dnsSync.resolve(knxnetIP)
@@ -28,10 +28,10 @@ var connection = knx.Connection({
   // logLevel: 'debug',
   handlers: {
     connected: function () {
-      console.log('Connected!')
+      logger.info('Connected!')
     },
     event: function (evt, src, dest, value) {
-      console.log(
+      logger.info(
         '%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j, name: %j',
         new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
         evt,
@@ -42,7 +42,7 @@ var connection = knx.Connection({
       )
     },
     error: function (connstatus) {
-      console.log('**** ERROR: %j', connstatus)
+      logger.error('**** ERROR: %j', connstatus)
     }
   }
 })
