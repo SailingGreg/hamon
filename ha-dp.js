@@ -7,6 +7,7 @@
 
 // load knx ip stack
 var knx = require('knx');
+const logger = require('./src/logger');
 
 // and create connection
 var connection = knx.Connection({
@@ -22,7 +23,7 @@ var connection = knx.Connection({
  //loglevel: 'debug',
  handlers: {
   connected: function() {
-    console.log('Connected!');
+    logger.info('Connected!');
 
     // read temp
     // this is temp on 1.1.14
@@ -38,32 +39,32 @@ var connection = knx.Connection({
     dp.on('event', function(evt, value) {
                    //onKnxEvent(evt, key, value, groupAddresses[key]);
        // need to check the evt type - is it Write!
-       console.log("**** %j %j reports current value: %j",  tdpga, evt, value);
+       logger.info("**** %j %j reports current value: %j",  tdpga, evt, value);
     });
 
-    console.log('Read temp');
+    logger.info('Read temp');
     dp.read( function (response) {
-        console.log("KNX %j response: %j", response);
+        logger.info("KNX %j response: %j", response);
     });
 
     dp.read((src, value) => {
-       console.log("**** RESPONSE %j reports current value: %j", src, value);
+       logger.info("**** RESPONSE %j reports current value: %j", src, value);
     });
 
     //connection.read("0/1/0", (src, value) => { 
-      //console.log("**** RESPONSE %j reports current value: %j", src, value);
+      //logger.info("**** RESPONSE %j reports current value: %j", src, value);
     // });
   },
   event: function (evt, src, dest, value) {
-   console.log("%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j",
+   logger.info("%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j",
     new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
     evt, src, dest, value);
   },
   error: function(connstatus) {
-      console.log("**** ERROR: %j", connstatus);
+      logger.error("**** ERROR: %j", connstatus);
   }
   //dp.on('change', function(oldvalue, newvalue) {
-       //console.log("**** DP reports current values: %j %j", oldvalue, newvalue);
+       //logger.info("**** DP reports current values: %j %j", oldvalue, newvalue);
   //});
  }
 });

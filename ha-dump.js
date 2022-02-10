@@ -13,6 +13,7 @@ var dnsSync = require('dns-sync');
 const yaml = require('js-yaml');
 const fs = require('fs');
 const yargs = require('yargs');
+const logger = require('./src/logger');
 
 configFile = "hamon.yml"; // default configuration file
 
@@ -30,7 +31,7 @@ const argv = yargs
   .argv;
 
 if (argv.config) {
-  //console.log('Optional configuration file specified: %s', argv.config);
+  //logger.info('Optional configuration file specified: %s', argv.config);
   configFile = argv.config;
 }
 loc = argv.loca; // the location
@@ -39,16 +40,16 @@ loc = argv.loca; // the location
 /*
 var loc = process.argv[2];
 if (loc == undefined || loc == "") {
-    console.log ("usage: %s [-c {config.yml}] {location}", process.argv[1]);
+    logger.info("usage: %s [-c {config.yml}] {location}", process.argv[1]);
     return 1;
 }
 */
 
 // and configuration file
 if (fs.existsSync("./" + configFile)) {
-  console.log("Using configuration file: %s for location: %s", configFile, loc);
+  logger.info("Using configuration file: %s for location: %s", configFile, loc);
 } else {
-  console.log("Configuration file %s doesn't exist", configFile);
+  logger.info("Configuration file %s doesn't exist", configFile);
   return 1;
 }
 
@@ -59,7 +60,7 @@ var knxnetLoc = "";
 for (deploy in doc["locations"]) {
   cnt = cnt + 1;
   install = doc["locations"][deploy]
-  console.log("\t %s %s %s %d", deploy, install['name'], install['dns'], install['port']);
+  logger.info("\t %s %s %s %d", deploy, install['name'], install['dns'], install['port']);
   if (install['name'] == loc) {
     knxnetLoc = install['name'];
     knxnetIP = install['dns'];
@@ -72,10 +73,10 @@ for (deploy in doc["locations"]) {
 
 // check if location found
 if (knxnetLoc == "") {
-  console.log("Location %s not found", loc);
+  logger.info("Location %s not found", loc);
   return 1;
 }
-console.log("Dumping %s %s %d (%s)", knxnetLoc, knxnetIP, knxnetPort, knxnetXML);
+logger.info("Dumping %s %s %d (%s)", knxnetLoc, knxnetIP, knxnetPort, knxnetXML);
 // resolve the KNXnet/IP router
 knxnetAddr = dnsSync.resolve(knxnetIP);
 
@@ -93,11 +94,11 @@ var connection = knx.Connection({
   loglevel: logging,
   handlers: {
     connected: function () {
-      console.log('Connected!')
+      logger.info('Connected!')
       // DO THINGS HERE
     },
     event: function (evt, src, dest, value) {
-      console.log(
+      logger.info(
         '%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j, name: %j',
         new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
         evt,
@@ -108,17 +109,17 @@ var connection = knx.Connection({
       )
     },
     error: function (connstatus) {
-      console.log('**** ERROR: %j', connstatus)
+      logger.error('**** ERROR: %j', connstatus)
     }
   }
 })
 
 function exitHandler(options) {
   if(connection.state === 'connected' || connection.state === 'idle') {
-    console.log('Connection is established while trying to close ha-dump script, disconnecting...')
+    logger.info('Connection is established while trying to close ha-dump script, disconnecting...')
     connection.Disconnect()
     connection.on('disconnected', () => {
-      console.log('Disconnected, closing ha-dump gracefully.')
+      logger.info('Disconnected, closing ha-dump gracefully.')
       if (options.exit) process.exit();
     })
   } else {

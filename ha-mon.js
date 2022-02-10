@@ -17,6 +17,7 @@ const Influx = require('influx');
 const winston = require('winston');
 const yaml = require('js-yaml');
 const fs   = require('fs');
+const logger = require('./src/logger');
 
 // host and port - move to config file
 var knxnetIP = "ha-test.dyndns.org";
@@ -25,7 +26,7 @@ var knxPort = 50001;
 var knxLoc = "";
 
 // set the location/path - done in systemd service file
-//console.log(process.env); 
+//logger.info(process.env); 
 let home = process.env.HOME; // check for HOST=ha-test
 if (typeof home == 'undefined') {
     var loc = "/home/pi/hamon/";
@@ -180,7 +181,7 @@ var connection = knx.Connection({
            if (groupAddresses.hasOwnProperty(key)) {
 		// construct dp for the groupaddress
                let dp = new knx.Datapoint({ga: key, dpt: groupAddresses[key].dpt}, connection);
-		//console.log("New dp %j", dp.dpt.subtype.name);
+		//logger.info("New dp %j", dp.dpt.subtype.name);
                groupAddresses[key].endpoint = dp;
                groupAddresses[key].unit = dp.dpt.subtype !== undefined ? dp.dpt.subtype.unit || '' : '';
                groupAddresses[key].type = dp.dpt.subtype !== undefined ? dp.dpt.subtype.name || '' : '';
@@ -213,7 +214,7 @@ var connection = knx.Connection({
             groupAddresses[dest].endpoint.current_value,
             groupAddresses[dest].unit);
 
-	//console.log("Endpoint %j", groupAddresses[dest].endpoint.dpt);
+	//logger.info("Endpoint %j", groupAddresses[dest].endpoint.dpt);
 
 
 	// encode the evt to shorten it - "gw" or "re"

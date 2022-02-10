@@ -8,6 +8,7 @@
 var knx = require('knx');
 const Influx = require('influx');
 var dnsSync = require('dns-sync');
+const logger = require('./src/logger');
 
 inited = false; // guard condition
 
@@ -17,7 +18,7 @@ var knxPort = 50001;
 
 // resolve the KNXnet/IP router
 knxAddr = dnsSync.resolve(knxnetIP);
-console.log('KNXnet/IP %s -> %s', knxnetIP, knxAddr);
+logger.info('KNXnet/IP %s -> %s', knxnetIP, knxAddr);
 
 // create the influxDB connection
 const influx = new Influx.InfluxDB({
@@ -40,15 +41,15 @@ const influx = new Influx.InfluxDB({
 // handle datapoint
 let knxEvent = function(evt, value, dp) {
 
-    //console.log("knxEvent");
+    //logger.info("knxEvent");
     // dpt.subtype have name, desc, unit and range
     dpdesc = dp.dpt.subtype.desc;
     dpunit = dp.dpt.subtype.unit;
     dpga = dp.options.ga;
-    //console.log("knxEvent - after refs");
+    //logger.info("knxEvent - after refs");
 
     // need to check the evt type - is it Write!
-    console.log("%s **** %j %j reports: %j (%j %j)",
+    logger.info("%s **** %j %j reports: %j (%j %j)",
 		new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
 		dpga, evt, value, dpdesc, dpunit);
 
@@ -73,7 +74,7 @@ let knxEvent = function(evt, value, dp) {
 	      precision: 'ms',
 	})
 	    .catch(error => {
-	      console.error(`Error saving data to InfluxDB! ${error.stack}`)
+	      logger.error(`Error saving data to InfluxDB! ${error.stack}`)
 	     });
     }
 }
@@ -92,7 +93,7 @@ var connection = knx.Connection({
  //loglevel: 'debug',
  handlers: {
   connected: function() {
-    console.log('Connected!');
+    logger.info('Connected!');
 
     // read temp
     // this is temp on 1.1.14
@@ -101,7 +102,7 @@ var connection = knx.Connection({
 
     // avoid creating multipe datapoints on reconnection
     if (inited == false) {
-        console.log("inited");
+        logger.info("inited");
         let dp = new knx.Datapoint({ga: tdpga, dpt: 'DPT9.001'}, connection);
 
         // need a guard to only do this once!!!
@@ -115,13 +116,13 @@ var connection = knx.Connection({
   }, // end connect:
  /*
   event: function (evt, src, dest, value) {
-   console.log("%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j",
+   logger.info("%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j",
     new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
     evt, src, dest, value);
   },
  */
   error: function(connstatus) {
-      console.log("**** ERROR: %j", connstatus);
+      logger.error("**** ERROR: %j", connstatus);
   }
  }
 });
