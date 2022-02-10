@@ -118,7 +118,7 @@ function exitHandler(options) {
     console.log('Connection is established while trying to close ha-dump script, disconnecting...')
     connection.Disconnect()
     connection.on('disconnected', () => {
-      console.log('Distonnected, closing ha-dump gracefully.')
+      console.log('Disconnected, closing ha-dump gracefully.')
       if (options.exit) process.exit();
     })
   } else {

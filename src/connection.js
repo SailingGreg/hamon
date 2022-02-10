@@ -27,7 +27,7 @@ parentPort.on("message", (value) => {
             // should also tidyup MQTT thread
             mqdisconnect();
             connection.on('disconnected', () => {
-              console.log('Distonnected, closed connection gracefully.')
+              console.log('Disconnected, closed connection gracefully.')
               process.exit(0);
             })
 	}
