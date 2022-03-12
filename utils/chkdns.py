@@ -74,43 +74,54 @@ signal.signal(signal.SIGINT, handleSignal);
 signal.signal(signal.SIGTERM, handleSignal);
 
 cnt = init();
+err = False;
 
 print (f"Checking for {cnt} locations");
 logging.info(f"Checking for {cnt} locations");
 while (True):
     for host in hosts:
         hostname = host['dns'];
-        addrinfo = socket.getaddrinfo(hostname, 80);
+        try:
+            addrinfo = socket.getaddrinfo(hostname, 80);
+            err = False;
+        except:
+            err = True;
+            exc_type, exc_value, exc_traceback = sys.exc_info();
+            lines = traceback.format_exception(exc_type, exc_value, \
+                                                            exc_traceback);
+            logging.error(f"Error re DNS query {lines}");
 
-        addr = addrinfo[0][4][0];
-       
-        now = datetime.now()
 
-        #print (now);
-        #current_time = now.strftime("%D %H:%M:%S")
-        #print("Current Time =", current_time)
+        if (err == False): # if we have an address
+            addr = addrinfo[0][4][0];
+           
+            now = datetime.now()
 
-        if (host['addr'] == 0): # add
-            now = time.time();
-            cdate = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now));
-            #print ("Resolved ", host['dns'], addr, cdate);
-            logging.info(f"Resolved {host['dns']}, {addr}, {cdate}");
-            host['addr'] = addr;
-            host['time'] = now;
-        elif (host['addr'] != addr): # it has changed
-            now = time.time();
-            diff = now - host['time']
-            elapsed = str(timedelta(seconds=diff));
-            cdate = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now));
-            #print("DNS change ", cdate, host['dns'],
-                                        #host['addr'], addr, elapsed);
-            logging.warning(f"DNS change {cdate}: {host['dns']}, \
+            #print (now);
+            #current_time = now.strftime("%D %H:%M:%S")
+            #print("Current Time =", current_time)
+
+            if (host['addr'] == 0): # add
+                now = time.time();
+                cdate = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now));
+                #print ("Resolved ", host['dns'], addr, cdate);
+                logging.info(f"Resolved {host['dns']}, {addr}, {cdate}");
+                host['addr'] = addr;
+                host['time'] = now;
+            elif (host['addr'] != addr): # it has changed
+                now = time.time();
+                diff = now - host['time']
+                elapsed = str(timedelta(seconds=diff));
+                cdate = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now));
+                #print("DNS change ", cdate, host['dns'],
+                                          #host['addr'], addr, elapsed);
+                logging.warning(f"DNS change {cdate}: {host['dns']}, \
                                         {host['addr']} -> {addr}, {elapsed}");
-            host['addr'] = addr;
-            host['time'] = now;
+                host['addr'] = addr;
+                host['time'] = now;
 
-        #print(addr);
+            # if not err
 
-    time.sleep (300); # every 5 mins
+    time.sleep (60); # every 5 mins is 300
 
 # end of while(true)
