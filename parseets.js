@@ -33,8 +33,8 @@ etsProjectParser("./" + fileArg).then((project) => {
         if (groupAddresses.hasOwnProperty(key)) {
             if (groupAddresses[key].dpt != undefined)
                 dpts++;
-            console.log(key, groupAddresses[key].dpt,
-                groupAddresses[key].name);
+            // console.log(key, groupAddresses[key].dpt,
+            //     groupAddresses[key].name);
             ga++;
         }
     }

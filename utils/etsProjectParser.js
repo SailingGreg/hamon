@@ -1,7 +1,8 @@
 var fs = require('fs')
 var DecompressZip = require('decompress-zip')
 var sax = require('sax')
-var { stringToBool } = require('./stringToBool.js')
+var { stringToBool } = require('./stringToBool.js');
+const { formatGroupAddress } = require('./ga.js');
 
 function cleanWorkdir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
@@ -164,7 +165,7 @@ const etsProjectParser = async function (etsProjectFilePath, workdir = '.workfol
               self.project.groupAddresses.push({
                 id: element.attributes['Id'],
                 name: element.attributes['Name'],
-                address: parseInt(element.attributes['Address']),
+                address: formatGroupAddress(parseInt(element.attributes['Address'])),
                 description: element.attributes['Description'],
                 datapointType: element.attributes['DatapointType'],
                 unfiltered: element.attributes['Unfiltered'],
