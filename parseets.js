@@ -31,7 +31,8 @@ etsProjectParser("./" + fileArg).then((project) => {
     for (let key in groupAddresses) {
         addr++;
         if (groupAddresses.hasOwnProperty(key)) {
-            if (groupAddresses[key].dpt != undefined)
+            //if (groupAddresses[key].dpt != undefined)
+            if (groupAddresses[key].datapointType != undefined)
                 dpts++;
             // console.log(key, groupAddresses[key].dpt,
             //     groupAddresses[key].name);
