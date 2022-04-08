@@ -11,7 +11,7 @@ log=$loc/tmp/restart.log
 # comment when debugging
 cat > $loc/tmp/alert.json
 
-# note run and user
+# note the date and the user
 date >> $log
 whoami >> $log
 
@@ -20,7 +20,8 @@ location=`sed -n 's|^.*"tags":{"location":"\([a-z1-9]*\)"}.*$|\1|p' < $loc/tmp/a
 
 # do we have a location
 if [ "$location" == "" ]; then
-	echo "$0 {site}"
+	echo "usage: $0 {site}"
+	echo "No location, exiting"  >> $log
 	exit 1
 fi
 
@@ -45,6 +46,7 @@ if [[ $addr == 172.* ]]; then
 	# need to restart the right container so we need a name mapping
 	# and we based this on the container be the name of the location
 
+	echo "Restarting docker for $site" >> $log
 	#docker restart $site
 	#exit 0
 fi
@@ -59,6 +61,10 @@ echo "Restarting $site $config $addr $cont" >> $log
 echo $site > $loc/tmp/kpipe
 
 
+# restart handled in service.js
+#echo "Exiting and not touching $site xml" > $loc/tmp/kpipe
+echo "Exiting and not touching $site xml" >> $log
+exit 0
 
 # could grep the hamon.yml file and then fail back
 #xml=`grep "$site.*xml" $loc/hamon.yml | awk '{print $2}'`
