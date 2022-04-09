@@ -24,8 +24,10 @@ parentPort.on("message", (value) => {
             logger.info("Exiting - doing cleanup for: %s", name);
             // tidyup
             // this this need a guard as it throws an error if not connected
-            // if (connection.state === 'connected' || connection.state === 'idle' )
-            connection.Disconnect();
+            if (connection.state === 'connected' || \
+                                    connection.state === 'idle' ) {
+                connection.Disconnect();
+            }
             // should also tidyup MQTT thread
             mqdisconnect();
 
