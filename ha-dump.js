@@ -116,7 +116,8 @@ var connection = knx.Connection({
 function exitHandler(options) {
   if(connection.state === 'connected' || connection.state === 'idle') {
     console.log('Connection is established while trying to close ha-dump script, disconnecting...')
-    connection.Disconnect()
+    // As Disconnect requires cb, otherwise it crashes, we pass dummy cb and handle with events (Fixes 2.5.1 knx issue)
+    connection.Disconnect(() => null)
     connection.on('disconnected', () => {
       console.log('Disconnected, closing ha-dump gracefully.')
       if (options.exit) process.exit();
