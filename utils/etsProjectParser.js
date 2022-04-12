@@ -1,5 +1,5 @@
 var fs = require('fs')
-var DecompressZip = require('decompress-zip')
+var unzipper = require('unzipper')
 var sax = require('sax')
 var { stringToBool } = require('./stringToBool.js');
 const { formatGroupAddress } = require('./formatGa.js');
@@ -9,7 +9,7 @@ function cleanWorkdir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-const etsProjectParser = async function (etsProjectFilePath, workdir = '.workfolder') {
+const etsProjectParser = async function (etsProjectFilePath, password, workdir = '.workfolder') {
   // Create a function wide context
   const self = {}
 
@@ -32,34 +32,21 @@ const etsProjectParser = async function (etsProjectFilePath, workdir = '.workfol
   }
 
   // This function unzips the stream into workdir
-  const unzip = () => {
+  const unzip = async () => {
     // Create the unzipper
-    const unzipper = new DecompressZip(etsProjectFilePath)
-    return new Promise((resolve, reject) => {
-      // Install handlers
-      unzipper.on('error', err => {
-        reject(err)
-      })
-      unzipper.on('extract', () => {
-        resolve()
-      })
-      // Start the extraction process
-      unzipper.extract({
-        path: self.workdir
-      })
-    })
+    await fs.createReadStream(etsProjectFilePath).pipe(unzipper.Extract({ path: workdir })).promise();
   }
 
   // This function finds the project information folder
-  const findProjectInfoFolder = () => {
+  const findProjectInfoFolder = async () => {
     try {
       // Look trough the list of names - everything starting with 'P-' is a project folder
-      self.projectFolderPath = fs.readdirSync(workdir).map(name => {
+      const resultProjectPath = fs.readdirSync(workdir).map(name => {
         if (name.startsWith('P-')) {
           // Create the full path of the found node
           let fullName = workdir + '/' + name
-          // Check if it is a file or a folder
-          if (fs.statSync(fullName).isDirectory()) {
+          // Check if it is a file, folder or encrypted zip
+          if (fs.statSync(fullName).isDirectory() || fullName.endsWith('.zip')) {
             // This node is valid
             return fullName
           }
@@ -72,13 +59,28 @@ const etsProjectParser = async function (etsProjectFilePath, workdir = '.workfol
         return value || 0
       })[0]
 
+      self.projectFolderPath = resultProjectPath
+
+      // Handle encrypted project folder
+      if (resultProjectPath.endsWith('.zip')) {
+        console.log('Project folder is encrypted, unpacking it with passed password..')
+        const directory = await unzipper.Open.file(resultProjectPath);
+        const projectFiles = await directory.files;
+        const outputDir = resultProjectPath.slice(0, -4)
+        fs.mkdirSync(outputDir)
+        await Promise.all(projectFiles.map(async projectFile => {
+          fs.writeFileSync(outputDir + '/' + projectFile.path, await projectFile.buffer(password));
+        }))
+        self.projectFolderPath = outputDir
+      }
+
       // Check if anything was found
       if (!self.projectFolderPath) {
         // Error - unable to find matching folders
         return Error(util.format('The file \'%s\' does not contain any projects!', etsProjectFilePath))
       }
     } catch (e) {
-      connsole.log('e', e)
+      console.error('Error while finding project info folder', e)
       return (e)
     }
   }
@@ -160,7 +162,6 @@ const etsProjectParser = async function (etsProjectFilePath, workdir = '.workfol
         xmlParser.on('opentag', (element) => {
           switch (element.name) {
             case ('GroupAddress'):
-              // console.log('element', element)
               if (!self?.project?.groupAddresses) {
                 self.project.groupAddresses = []
               }

@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "decompress-zip": "^0.3.3",
     "dns-sync": "^0.2.1",
     "dotenv": "^9.0.2",
     "influx": "^5.9.0",
@@ -10,6 +9,7 @@
     "knx.js": "^0.7.4",
     "mqtt": "^4.2.6",
     "sax": "^1.2.4",
+    "unzipper": "^0.10.11",
     "winston": "^3.3.3",
     "xml-js": "^1.6.11",
     "yargs": "^17.0.1"

@@ -10,6 +10,7 @@ const { etsProjectParser } = require('./utils/etsProjectParser');
 
 //console.log(process.argv);
 var fileArg = process.argv[2];
+var passwordArg = process.argv[3];
 if (fileArg == undefined || fileArg == "") {
     console.log ("usage: %s {filename}", process.argv[1]);
     process.exit(1)
@@ -22,7 +23,7 @@ if (fs.existsSync("./" + fileArg)) {
     process.exit(1)
 }
 
-etsProjectParser("./" + fileArg).then((project) => {
+etsProjectParser("./" + fileArg, passwordArg).then((project) => {
     console.log('project', project)
     addr = 0;
     dpts = 0;
