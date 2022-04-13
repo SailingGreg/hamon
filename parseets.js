@@ -12,19 +12,18 @@ const { etsProjectParser } = require('./utils/etsProjectParser');
 var fileArg = process.argv[2];
 var passwordArg = process.argv[3];
 if (fileArg == undefined || fileArg == "") {
-    console.log ("usage: %s {filename}", process.argv[1]);
+    console.log("usage: %s {filename}", process.argv[1]);
     process.exit(1)
 }
 
 if (fs.existsSync("./" + fileArg)) {
-    console.log ("Parsing file %s", fileArg);
+    console.log("Parsing file %s", fileArg);
 } else {
-    console.log ("File %s doesn't exist", fileArg);
+    console.log("File %s doesn't exist", fileArg);
     process.exit(1)
 }
 
 etsProjectParser("./" + fileArg, passwordArg).then((project) => {
-    console.log('project', project)
     addr = 0;
     dpts = 0;
     ga = 0;
@@ -40,8 +39,16 @@ etsProjectParser("./" + fileArg, passwordArg).then((project) => {
             ga++;
         }
     }
-    console.log("%s has %d entries, %d with values and %d DPTs",
-                          fileArg, addr, ga, dpts);
+
+    outputFile = fileArg.substring(0, fileArg.lastIndexOf('.')) + ".json";
+    fs.writeFile(outputFile, JSON.stringify(groupAddresses), err => {
+        if (err) {
+            throw err;
+        }
+        console.log('Address data is saved to ' + outputFile + ' file');
+    });
+
+    console.log("%s has %d entries, %d with values and %d DPTs", fileArg, addr, ga, dpts);
 })
 
 // end of file
