@@ -83,8 +83,16 @@ const etsProjectParser = async function (etsProjectFilePath, password, workdir =
   const parseProjectInformation = () => {
     return new Promise(resolve => {
       try {
-        // Create a read stream on the project.xml file
-        const stream = fs.createReadStream(self.projectFolderPath + '/project.xml')
+
+        // Create a read stream on the project.xml file OR Project.xml for ETS4
+        let stream
+        if (fs.existsSync(self.projectFolderPath + '/project.xml')) {
+          stream = fs.createReadStream(self.projectFolderPath + '/project.xml')
+        } else if (fs.existsSync(self.projectFolderPath + '/Project.xml')) {
+          stream = fs.createReadStream(self.projectFolderPath + '/Project.xml')
+        } else {
+          throw new Error('Project file not found')
+        }
         // Initialize a XML parser
         const xmlParser = sax.createStream(true)
         // A temporary object needed to parse project information
