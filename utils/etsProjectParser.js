@@ -39,49 +39,44 @@ const etsProjectParser = async function (etsProjectFilePath, password, workdir =
 
   // This function finds the project information folder
   const findProjectInfoFolder = async () => {
-    try {
-      // Look trough the list of names - everything starting with 'P-' is a project folder
-      const resultProjectPath = fs.readdirSync(workdir).map(name => {
-        if (name.startsWith('P-')) {
-          // Create the full path of the found node
-          let fullName = workdir + '/' + name
-          // Check if it is a file, folder or encrypted zip
-          if (fs.statSync(fullName).isDirectory() || fullName.endsWith('.zip')) {
-            // This node is valid
-            return fullName
-          }
+    // Look trough the list of names - everything starting with 'P-' is a project folder
+    const resultProjectPath = fs.readdirSync(workdir).map(name => {
+      if (name.startsWith('P-')) {
+        // Create the full path of the found node
+        let fullName = workdir + '/' + name
+        // Check if it is a file, folder or encrypted zip
+        if (fs.statSync(fullName).isDirectory() || fullName.endsWith('.zip')) {
+          // This node is valid
+          return fullName
         }
-        /*
-         * Filter out all undefined elements that resulted from items.map()
-         * Only the first project folder found is used
-         */
-      }).filter(value => {
-        return value || 0
-      })[0]
-
-      self.projectFolderPath = resultProjectPath
-
-      // Handle encrypted project folder
-      if (resultProjectPath.endsWith('.zip')) {
-        console.log('Project folder is encrypted, unpacking it with passed password..')
-        const directory = await unzipper.Open.file(resultProjectPath);
-        const projectFiles = await directory.files;
-        const outputDir = resultProjectPath.slice(0, -4)
-        fs.mkdirSync(outputDir)
-        await Promise.all(projectFiles.map(async projectFile => {
-          fs.writeFileSync(outputDir + '/' + projectFile.path, await projectFile.buffer(password));
-        }))
-        self.projectFolderPath = outputDir
       }
+      /*
+       * Filter out all undefined elements that resulted from items.map()
+       * Only the first project folder found is used
+       */
+    }).filter(value => {
+      return value || 0
+    })[0]
 
-      // Check if anything was found
-      if (!self.projectFolderPath) {
-        // Error - unable to find matching folders
-        return Error(util.format('The file \'%s\' does not contain any projects!', etsProjectFilePath))
-      }
-    } catch (e) {
-      console.error('Error while finding project info folder', e)
-      return (e)
+    self.projectFolderPath = resultProjectPath
+
+    // Handle encrypted project folder
+    if (resultProjectPath.endsWith('.zip')) {
+      console.log('Project folder is encrypted, unpacking it with passed password..')
+      const directory = await unzipper.Open.file(resultProjectPath);
+      const projectFiles = await directory.files;
+      const outputDir = resultProjectPath.slice(0, -4)
+      fs.mkdirSync(outputDir)
+      await Promise.all(projectFiles.map(async projectFile => {
+        fs.writeFileSync(outputDir + '/' + projectFile.path, await projectFile.buffer(password));
+      }))
+      self.projectFolderPath = outputDir
+    }
+
+    // Check if anything was found
+    if (!self.projectFolderPath) {
+      // Error - unable to find matching folders
+      return Error(util.format('The file \'%s\' does not contain any projects!', etsProjectFilePath))
     }
   }
 
@@ -196,10 +191,24 @@ const etsProjectParser = async function (etsProjectFilePath, password, workdir =
     })
   }
 
-
+  let skipRestSteps = false
   await initEtsProjectParser(etsProjectFilePath, workdir)
   await findProjectInfoFolder()
-  await Promise.all([parseProjectInformation(), parseProject()])
+    .catch(err => {
+      if (err.message == 'BAD_PASSWORD') {
+        console.error('Passed password is incorrect')
+        skipRestSteps = true
+      } else {
+        throw err
+      }
+    })
+  if (!skipRestSteps) {
+    await Promise.all([parseProjectInformation(), parseProject()])
+  } else {
+    console.log('Skipping rest of steps because of error')
+    cleanWorkdir(workdir)
+    process.exit(1)
+  }
 
   // Clean workfolder
   cleanWorkdir(workdir)
