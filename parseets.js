@@ -41,7 +41,7 @@ etsProjectParser("./" + fileArg, passwordArg).then((project) => {
     }
 
     outputFile = fileArg.substring(0, fileArg.lastIndexOf('.')) + ".json";
-    fs.writeFile(outputFile, JSON.stringify(groupAddresses), err => {
+    fs.writeFile(outputFile, JSON.stringify(mapGrpAddresesToJSONFormat(groupAddresses)), err => {
         if (err) {
             throw err;
         }
@@ -52,3 +52,11 @@ etsProjectParser("./" + fileArg, passwordArg).then((project) => {
 })
 
 // end of file
+function mapGrpAddresesToJSONFormat(groupAddresses) {
+    groupAddresses = groupAddresses.map(grpAddr => {
+        grpAddr.dtp = grpAddr.datapointType
+        delete grpAddr.datapointType
+        return grpAddr
+    })
+    return groupAddresses
+}
