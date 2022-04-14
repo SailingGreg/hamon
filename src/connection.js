@@ -15,6 +15,7 @@ const dnsSync = require('dns-sync')
 const { MQTTconnect, mqdisconnect } = require('./mqwrite')
 //const strtodpt = require('./strtodpt')
 const { loadmapping, mapstring } = require('./strtodpt')
+const fs = require('fs');
 // added device so switch can be appropriate
 const { dns, port, config, name, path, influxver, logging, device, phyAddr } = workerData?.location
 
