@@ -173,7 +173,7 @@ const etsProjectParser = async function (etsProjectFilePath, password, workdir =
                 name: element.attributes['Name'],
                 address: formatGroupAddress(parseInt(element.attributes['Address'])),
                 description: element.attributes['Description'],
-                datapointType: formatDatapointType(element.attributes['DatapointType']),
+                dpt: formatDatapointType(element.attributes['DatapointType']),
                 unfiltered: element.attributes['Unfiltered'],
                 central: stringToBool(element.attributes['Central'])
               })
