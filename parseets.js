@@ -54,7 +54,7 @@ etsProjectParser("./" + fileArg, passwordArg).then((project) => {
 // end of file
 function mapGrpAddresesToJSONFormat(groupAddresses) {
     groupAddresses = groupAddresses.map(grpAddr => {
-        grpAddr.dtp = grpAddr.datapointType
+        grpAddr.dpt = grpAddr.datapointType
         delete grpAddr.datapointType
         return grpAddr
     })
