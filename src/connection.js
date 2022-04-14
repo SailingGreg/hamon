@@ -78,7 +78,7 @@ logger.info('KNXnet/IP %s -> %s', dns, knxAddr)
 // READ CONFIG FILE
 const configFilePath = path + config
 let groupAddresses = {}
-const configFileExtension = fileArg.substring(fileArg.lastIndexOf('.'), fileArg.length)
+const configFileExtension = config.substring(config.lastIndexOf('.'), config.length)
 
 if(configFileExtension === '.json') {
   // config is json no need to parse it
