@@ -74,7 +74,19 @@ const knxAddr = dnsSync.resolve(dns)
 logger.info('KNXnet/IP %s -> %s', dns, knxAddr)
 
 //console.log("connection.js %s", path);
-const groupAddresses = ets.parsexml(path + config) || {}
+
+// READ CONFIG FILE
+const configFilePath = path + config
+let groupAddresses = {}
+const configFileExtension = fileArg.substring(fileArg.lastIndexOf('.'), fileArg.length)
+
+if(configFileExtension === '.json') {
+  // config is json no need to parse it
+  let rawdata = fs.readFileSync(configFilePath);
+  groupAddresses = JSON.parse(rawdata);
+} else {
+  groupAddresses = ets.parsexml(configFilePath) || {}
+}
 
 // load str to dtp mappings
 loadmapping(path); // initialise
