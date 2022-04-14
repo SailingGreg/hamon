@@ -84,7 +84,10 @@ const configFileExtension = config.substring(config.lastIndexOf('.'), config.len
 if(configFileExtension === '.json') {
   // config is json no need to parse it
   let rawdata = fs.readFileSync(configFilePath);
-  groupAddresses = new Map(JSON.parse(rawdata).map(i => [i.address, i]));
+  groupAddresses = JSON.parse(rawdata).reduce(function(map, obj) {
+    map[obj.address] = obj;
+    return map;
+  }, {});
 } else {
   groupAddresses = ets.parsexml(configFilePath) || {}
 }
