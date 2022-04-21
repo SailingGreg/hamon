@@ -82,14 +82,19 @@ const configFilePath = path + 'config/' + config
 let groupAddresses = {}
 const configFileExtension = config.substring(config.lastIndexOf('.'), config.length)
 
-if(configFileExtension === '.json') {
-  // config is json no need to parse it
-  let rawdata = fs.readFileSync(configFilePath);
+//if(configFileExtension === '.json') {
+if(configFileExtension === '.knxproj') {
+  // config is json no need to parse it - but need to change extn
+    var configFile = configFilePath.substring(0, configFilePath.lastIndexOf('.')) + '.json'
+
+    logger.info(`Loading json intermediate file: ${configFile}`);
+  let rawdata = fs.readFileSync(configFile);
   groupAddresses = JSON.parse(rawdata).reduce(function(map, obj) {
     map[obj.address] = obj;
     return map;
   }, {});
 } else {
+    // load the xml export
   groupAddresses = ets.parsexml(configFilePath) || {}
 }
 
