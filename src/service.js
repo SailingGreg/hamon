@@ -165,7 +165,9 @@ async function ConnectionService(firstrun, path, doc) {
     let loc = doc.locations[location]
     logger.info(`Checking: ${loc.name} ${loc.dns} ${loc.port} ${loc.device}`)
 
-    let stats = fs.statSync(path + loc.config);
+    // added config to suport move of config files
+    let stats = fs.statSync(path + 'config/' + loc.config);
+    //let stats = fs.statSync(path + loc.config);
     if (firstrun != true) { // check if there is a change
         // config change?
         let oldLoc = findLoc(loc.name, originalDoc);

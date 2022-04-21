@@ -77,7 +77,8 @@ logger.info('KNXnet/IP %s -> %s', dns, knxAddr)
 //console.log("connection.js %s", path);
 
 // READ CONFIG FILE
-const configFilePath = path + config
+// add 'config' for file move
+const configFilePath = path + 'config/' + config
 let groupAddresses = {}
 const configFileExtension = config.substring(config.lastIndexOf('.'), config.length)
 
