@@ -30,28 +30,32 @@ echo "Restarting the site: $site"
 #echo $site > $loc/tmp/kpipe
 
 # check the site name in the configuration file
-cnt=`grep -c -m 1 $site $loc/hamon.yml`
+cnt=`grep -c -m 1 "name: $site" $loc/hamon.yml`
 
 #echo $cnt
 if [ $cnt -eq 0 ]; then
 	echo "site $site not defined"
 	exit 1
 fi
+echo "Restarting $site"
 
 # could grep the hamon.yml file and then fail back
 #xml=`grep "$site.*xml" $loc/hamon.yml | awk '{print $2}'`
 
 # do site -> configuration file mapping
-xml=`grep $site $loc/sitesxml.conf | awk '{print $2}'`
+xml=`grep -A 10 " name: $site" $loc/hamon.yml | grep "config:" | awk '{print $2}'`
+
+print $xml
 
 if [ "$xml" == "" ]; then
 	echo "There is no xml file for $site"
 	exit 1
 fi
 
+
 echo "Touching $loc/$xml" >> $log
-if [ -f $loc/$xml ]; then
-	touch $loc/$xml
+if [ -f $loc/config/$xml ]; then
+	touch $loc/config/$xml
 else
 	echo "The xml file $xml doesn't exist for $site"
 	exit 1

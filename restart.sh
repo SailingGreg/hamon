@@ -9,6 +9,11 @@ log=$loc/tmp/restart.log
 # note the json passed on stdin
 # should be $$ for process file so unique
 # comment when debugging
+if [ -t 0 ] && [ -n "$TERM" ]; then
+	echo "Running from a terminal" >> $log
+else
+	echo "Not running from a terminal" >> $log
+fi 
 cat > $loc/tmp/alert.json
 
 # note the date and the user
@@ -16,7 +21,7 @@ date >> $log
 whoami >> $log
 
 # extract the location from the args
-location=`sed -n 's|^.*"tags":{"location":"\([a-z1-9]*\)"}.*$|\1|p' < $loc/tmp/alert.json`
+location=`sed -n 's|^.*"tags":{"location":"\([a-z1-9].*\)"}.*$|\1|p' < $loc/tmp/alert.json`
 
 # do we have a location
 if [ "$location" == "" ]; then
@@ -36,8 +41,19 @@ if [ $cnt -eq 0 ]; then
 fi
 
 # find the xml file and address from hamon.yml
-config=`grep -A 8 " name: $site" $loc/hamon.yml | grep config | awk  '{print $2}'`
-addr=`grep -A 8 " name: $site" $loc/hamon.yml | grep dns | awk  '{print $2}'`
+# number of lines increased with addition of hapi to configuration file
+config=`grep -A 9 " name: $site" $loc/hamon.yml | grep config | awk  '{print $2}'`
+addr=`grep -A 9 " name: $site" $loc/hamon.yml | grep dns | awk  '{print $2}'`
+enabled=`grep -A 9 " name: $site" $loc/hamon.yml | grep enabled | awk  '{print $2}'`
+
+# Guard to note if site has disabled
+WHO=`whoami`
+if [ "$enabled" == "false" ]; then
+	echo "Exiting as $site disabled - $WHO" >> $log
+	# restart kapacitor to stop alerts
+	# systemctl restart kapacitor
+	exit 0
+fi
 
 # is this a container that is "172."
 if [[ $addr == 172.* ]]; then
@@ -47,7 +63,8 @@ if [[ $addr == 172.* ]]; then
 	# and we based this on the container be the name of the location
 
 	echo "Restarting docker for $site" >> $log
-	#docker restart $site
+	docker restart $site
+	sleep 10 # allow time for reestablishment of vpn
 	#exit 0
 fi
 
