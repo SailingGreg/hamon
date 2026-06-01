@@ -39,7 +39,7 @@ home-dev is the same minus kapacitor.
 
 **Outstanding hardening (recommended, not yet done):**
 - **Host firewall (ufw):** default-deny inbound, allow only 22, 3000, 8080 — so we don't rely solely on the provider firewall. (Allow ssh *before* enabling.)
-- **Bind internal services to localhost:** influxd → `127.0.0.1:8086`, kapacitor → `127.0.0.1:9092` (only local consumers).
+- **Bind internal services to localhost:** influxd → `127.0.0.1:8086`, kapacitor → `127.0.0.1:9092` (only local consumers). Reach the **Influx console** afterwards via `influx-console.sh [host]` — an SSH tunnel to `http://localhost:8086` (run on your own machine; `--check` validates it). The Influx 2.x console can't be reverse-proxied under a subpath (absolute asset paths, no base-path setting) — use a subdomain or this tunnel.
 - **mosquitto:** confirm it is not anonymous; add auth/ACL; bind to localhost or just the VPN/site interface.
 
 ## Collector & app
