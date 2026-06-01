@@ -36,6 +36,9 @@ home-dev is the same minus kapacitor.
 **Hardening applied 2026-06-01 (both servers):**
 - SSH: `PasswordAuthentication no`, `PermitRootLogin no` (key-only). Backup at `/etc/ssh/sshd_config.bak.20260601`.
 - **fail2ban** installed, `sshd` jail enabled (bantime 1h, maxretry 5) — actively banning brute-forcers.
+- **influxd bound to `127.0.0.1:8086` on prod** (config.toml `http-bind-address`, backup `.bak.20260601`) — 8086 no longer internet-facing; console via the SSH tunnel. (home-dev influxd not yet bound.)
+
+**Reverse-proxy prototype (nginx) — home-dev only, 2026-06-01:** nginx 1.18 on :443 with the home-dev LE cert (`/etc/nginx/sites-available/grafana.conf`) fronts **Grafana at `/`** and **hamon-upload at `/upload/`** (UI assets are relative so they subpath cleanly; its 3 absolute endpoints — `/load|upload-configuration-file`, `/upload-location-configuration-file` — are routed via exact-match `location` blocks). Backends stay http on localhost. hamon-upload is run there in http/dev mode for the prototype (its prod unit hardcodes prod cert paths + couples auth to NODE_ENV — behind nginx it needs a "production-but-http, keep-auth" mode). Influx 2.x console can't subpath (absolute assets) → use the `influx-console.sh` tunnel. Not yet on prod.
 
 **Outstanding hardening (recommended, not yet done):**
 - **Host firewall (ufw):** default-deny inbound, allow only 22, 3000, 8080 — so we don't rely solely on the provider firewall. (Allow ssh *before* enabling.)
