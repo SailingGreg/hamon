@@ -1,0 +1,57 @@
+#! /usr/bin/bash
+#
+# simple script to do a backup of influx and grafana
+# script creates a tar ball that can be sent to S3 or similar
+# Note use influxd restore to recover
+#
+# Requires an InfluxDB token, kept OUT of version control.
+# Create $loc/.hamon-backup.env (chmod 600) containing:
+#   INFLUX_TOKEN="<token>"
+
+# the current date
+DATE=`date +%F`
+#S3BUCKET="http://123"
+loc=/home/greg/hamon
+DIR=/var/opt/hamon/backups
+
+# load the InfluxDB token from an untracked env file
+ENVFILE=$loc/.hamon-backup.env
+if [ -f "$ENVFILE" ]; then
+	. "$ENVFILE"
+fi
+if [ -z "$INFLUX_TOKEN" ]; then
+	echo "$0: INFLUX_TOKEN not set (expected in $ENVFILE)" >&2
+	exit 1
+fi
+
+# do the backup of the meta data and date for 'hamon' - 1.0
+#influxd backup -portable -database hamon $DIR/mysnapshot > /dev/null
+
+# 2.0
+influx backup $DIR/mysnapshot -t $INFLUX_TOKEN
+
+# Add the Grafana sqlite database
+cp /var/lib/grafana/grafana.db $DIR
+
+cd $DIR
+
+# copy the configuration files
+cp /etc/kapacitor/kapacitor.conf .
+cp /etc/grafana/grafana.ini .
+
+#tar cf influx.${DATE} mysnapshot grafana.db *.ini
+tar cf influx.${DATE} mysnapshot grafana.db *.ini *.conf
+
+# clean up
+#rm -r mysnapshot grafana.db *.ini
+rm -r mysnapshot grafana.db *.ini *.conf
+
+# archive
+#sftp influx.${DATE} S3BUCKET
+
+# if backup exists over ~6 days old then delete
+if [ $(find . -maxdepth 1 -name "influx.*" -mtime +6 -print | wc -l) -gt 0 ]; then
+	find . -maxdepth 1 -name "influx.*" -mtime +6 -print | xargs rm
+fi
+
+exit 0
