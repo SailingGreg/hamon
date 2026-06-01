@@ -41,6 +41,7 @@ cp /etc/grafana/grafana.ini .
 
 #tar cf influx.${DATE} mysnapshot grafana.db *.ini
 tar cf influx.${DATE} mysnapshot grafana.db *.ini *.conf
+rc=$?
 
 # clean up
 #rm -r mysnapshot grafana.db *.ini
@@ -54,4 +55,9 @@ if [ $(find . -maxdepth 1 -name "influx.*" -mtime +6 -print | wc -l) -gt 0 ]; th
 	find . -maxdepth 1 -name "influx.*" -mtime +6 -print | xargs rm
 fi
 
-exit 0
+# surface tar failures instead of masking them with exit 0,
+# so cron actually reports an incomplete backup
+if [ $rc -ne 0 ]; then
+	echo "$0: tar reported errors (exit $rc) - influx.${DATE} may be incomplete" >&2
+fi
+exit $rc
