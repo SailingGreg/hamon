@@ -36,6 +36,20 @@ const influxdb = new Influxdb({
   */
 })
 
+// Wind orientation (DPT_String_ASCII) arrives as a compass label rather than
+// a number; map it to bearing degrees so it can be stored in the float `value`
+// field. Keys are lower-cased; note the device emits the typo "Nort-Easterly".
+const WIND_DIR_DEG = {
+  "northerly": 0,
+  "nort-easterly": 45, "north-easterly": 45,
+  "easterly": 90,
+  "south-easterly": 135,
+  "southerly": 180,
+  "south-westerly": 225,
+  "westerly": 270,
+  "north-westerly": 315
+}
+
 // write to influxDB
 function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit) {
   if (evt != 'GroupValue_Write' && evt != 'GroupValue_Response') return;
@@ -54,7 +68,9 @@ function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit) {
             //logger.info("DPT_TimeOfDay (%s) %s", type, value);
             return;
 	}
-	// for now we just assign it which means the write fails
+	// composite/object DPTs (e.g. DPT_SceneControl) are not yet expanded
+	// into numeric points - leave dbvalue as the object so the guard below
+	// skips it rather than writing "[object Object]" which InfluxDB rejects
         dbvalue = value;
         //logger.info("Object value %s %s (%s) %s", src, dest, type, value);
     } else if (typeof(value) == "boolean") {
@@ -65,11 +81,29 @@ function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit) {
             dbvalue = 0;
 	//value = value == true ? 1 : 0;
         //logger.info("> Boolean value %j %s", dbvalue, typeof(dbvalue));
+    } else if (typeof(value) == "string") {
+        // KNX payloads are predominantly numeric but some arrive as strings.
+        // Strip DPT16 null padding, then coerce to a number so they land in
+        // the float `value` field instead of being dropped on a type conflict.
+        const s = value.replace(/\u0000/g, "").trim();
+        const n = s === "" ? NaN : Number(s);
+        if (Number.isFinite(n)) {
+            dbvalue = n;
+        } else {
+            // not a plain number - try the wind-direction map (Westerly -> 270);
+            // anything still non-numeric stays a string and is skipped below
+            const deg = WIND_DIR_DEG[s.toLowerCase()];
+            dbvalue = deg !== undefined ? deg : value;
+        }
     } else { // assume "number"
          dbvalue = value;
     }
-    if (typeof(dbvalue) != "number") {
-        logger.info("dbvalue %s %s %j %s", src, dest, dbvalue, typeof(dbvalue));
+    // final guard: only finite numbers can go to the float `value` field;
+    // anything else (unconverted strings, objects, NaN) would be rejected by
+    // InfluxDB, so skip the write rather than emit a 422
+    if (typeof(dbvalue) != "number" || !Number.isFinite(dbvalue)) {
+        //logger.info("dbvalue %s %s %j %s", src, dest, dbvalue, typeof(dbvalue));
+        return;
     }
 
     // need to add guard for no DPT definition - where type is undefined
