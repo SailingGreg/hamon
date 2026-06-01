@@ -40,10 +40,15 @@ home-dev is the same minus kapacitor.
 
 **Reverse-proxy prototype (nginx) — home-dev only, 2026-06-01:** nginx 1.18 on :443 with the home-dev LE cert (`/etc/nginx/sites-available/grafana.conf`) fronts **Grafana at `/`** and **hamon-upload at `/upload/`** (UI assets are relative so they subpath cleanly; its 3 absolute endpoints — `/load|upload-configuration-file`, `/upload-location-configuration-file` — are routed via exact-match `location` blocks). Backends stay http on localhost. hamon-upload is run there in http/dev mode for the prototype (its prod unit hardcodes prod cert paths + couples auth to NODE_ENV — behind nginx it needs a "production-but-http, keep-auth" mode). Influx 2.x console can't subpath (absolute assets) → use the `influx-console.sh` tunnel. Not yet on prod.
 
-**Outstanding hardening (recommended, not yet done):**
-- **Host firewall (ufw):** default-deny inbound, allow only 22, 3000, 8080 — so we don't rely solely on the provider firewall. (Allow ssh *before* enabling.)
-- **Bind internal services to localhost:** influxd → `127.0.0.1:8086`, kapacitor → `127.0.0.1:9092` (only local consumers). Reach the **Influx console** afterwards via `influx-console.sh [host]` — an SSH tunnel to `http://localhost:8086` (run on your own machine; `--check` validates it). The Influx 2.x console can't be reverse-proxied under a subpath (absolute asset paths, no base-path setting) — use a subdomain or this tunnel.
-- **mosquitto:** confirm it is not anonymous; add auth/ACL; bind to localhost or just the VPN/site interface.
+**Hardening strategy (decided 2026-06-01): NOT using ufw / a host firewall.** Instead, harden by **closing external ports** — bind every service to `127.0.0.1` and leave only two ports publicly reachable: **22 (SSH)** and **443 (nginx)**.
+- Web UIs that proxy cleanly (Grafana, hamon-upload) go behind **nginx** on 443 (TLS terminates there; backends are plain http on localhost).
+- Anything that can't be proxied — the InfluxDB 2.x console (absolute asset paths, no base-path) — is reached over **SSH** via the `influx-console.sh` tunnel.
+- The provider firewall stays as a backstop, but binding-to-localhost is the actual control.
+
+**Outstanding (apply the strategy):**
+- **Bind to localhost:** grafana → `127.0.0.1:3000`, kapacitor → `127.0.0.1:9092`, home-dev influxd → `127.0.0.1:8086` (prod influxd already done). hamon-upload reachable only via nginx (needs a production-but-http, keep-auth run mode first).
+- **mosquitto (1883):** confirm not anonymous; add auth/ACL; bind to localhost or just the VPN/site interface.
+- Replicate the nginx control point to prod. End state: only **22 + 443** reachable externally on both hosts.
 
 ## Collector & app
 
