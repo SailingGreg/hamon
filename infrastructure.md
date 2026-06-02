@@ -20,7 +20,7 @@ Observed listeners (prod). Everything binds to all interfaces unless noted.
 | Port | Service | Intended public? | Auth |
 |------|---------|------------------|------|
 | 22 | sshd | needed (admin) | key-only, no root, fail2ban |
-| 1883 | mosquitto (MQTT) | **no — exposed** | unconfirmed (no explicit auth) |
+| 1883 | mosquitto (MQTT) | **yes — ingest feed** from remote Pi servers | none yet (anonymous) → TLS + cert auth planned |
 | 3000 | grafana (https) | yes | Grafana login |
 | 8080 | hamon-upload (node, https) | yes | Grafana session cookie (validated) |
 | 8086 | influxd | **no — exposed** | API token |
@@ -52,7 +52,7 @@ home-dev is the same minus kapacitor.
 - **Staging (home-dev) is now the fully-hardened reference (2026-06-02):** grafana bound `127.0.0.1:3000` (set `http_addr` in grafana.ini, backup `.bak.20260602`) — reachable only via nginx 443; influxd bound `127.0.0.1:8086` — reachable only via SSH tunnel; mosquitto already localhost. External `:3000`/`:8086` now refused. (Minor: home-dev still serves the packaged nginx default page on `:80` — no `:80→443` redirect block there yet, unlike prod.)
 - **Prod — gate on user sign-off** that the 443 paths (grafana `/`, upload `/upload/`) work before closing direct ports. nginx is live on prod with direct 3000/8080 still open in parallel for exactly this transition.
 - **Then bind prod to localhost:** grafana → `127.0.0.1:3000` (https upstream already proxied), kapacitor → `127.0.0.1:9092`, hamon-upload → `127.0.0.1:8080` (already proxied via https upstream — no http/keep-auth rework needed). prod influxd already done.
-- **mosquitto (1883) on prod:** confirm not anonymous; add auth/ACL; bind to localhost or just the VPN/site interface.
+- **mosquitto (1883) on prod — must stay reachable, secure via TLS+auth (NOT close).** It is the ingest feed: remote Pi-based site servers *publish* into this broker over the internet; the local `mqread.js` subscribes and writes to influx (`src/mqwrite.js`/`mqread.js` both `mqtt://localhost`). Currently mosquitto 1.6.9 with **no auth (anonymous)** — internet scanners are already connecting (45.79.207.181, 209.38.248.17, Censys, etc.). Lock down with **TLS + client-cert (mutual TLS) auth**, `allow_anonymous false`; keep a separate `127.0.0.1` plaintext listener for the local writer; migrate the remote Pis to the TLS listener; then retire plaintext public access.
 - ~~Replicate the nginx control point to prod~~ — **done 2026-06-02.** End state: only **22 + 443** reachable externally on both hosts.
 
 ## Collector & app
