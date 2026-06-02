@@ -9,6 +9,29 @@ const gadRegExp = new RegExp(
   topicPrefix + '/(\\w+)/(\\d+)/(\\d+)/(\\d+)(/([\\w\\d]+))?'
 )
 
+// Convert the raw MQTT string payload into the JS type the group address's DPT
+// expects, so knx Datapoint.write() encodes it correctly. Replaces the old
+// unconditional parseInt(), which turned floats (21.5 -> 21), strings and
+// booleans (e.g. "On" -> NaN) into bad values and broke the write.
+function coerceForDpt (dpt, raw) {
+  const s = String(raw).trim()
+  if (s.length === 0) return 0
+  const major = String(dpt || '').split('.')[0]
+  switch (major) {
+    case 'DPT1':            // boolean: switch / bool / enable ...
+      return /^(1|on|true|yes|enable)$/i.test(s)
+    case 'DPT9':            // 2-byte float (temperature, humidity, ...)
+    case 'DPT14':           // 4-byte float
+      return parseFloat(s)
+    case 'DPT16':           // character string
+      return s
+    case '':                // DPT unknown - best effort: number if numeric else string
+      return isNaN(Number(s)) ? s : Number(s)
+    default:                // integer DPTs: DPT5/6/7/8/12/13 (scaling, counts, ...)
+      return parseInt(s, 10)
+  }
+}
+
 let mqttClient = null; // rescope so available to disconnect
 function MQTTconnect(groupAddresses, connection, location) {
   //let mqttClient = mqtt.connect(MQTTBROKERIP)
@@ -24,12 +47,6 @@ function MQTTconnect(groupAddresses, connection, location) {
     let msg = message.toString('utf8')
 
     logger.info(`MQTT Topic: ${topic}, message: <${msg}>`)
-    // ensure value in shard is consistent and decimal
-    if (typeof msg === 'string')
-        if (msg.length == 0)
-            msg = 0
-        else
-            msg = parseInt(msg)
 
     if (topic.startsWith('knx')) {
       let gadArray = gadRegExp.exec(topic)
@@ -40,21 +57,35 @@ function MQTTconnect(groupAddresses, connection, location) {
 
       if (groupAddresses.hasOwnProperty(gad)) {
 
-        // log the actions - loc, type, target and 'value'
-        writeActions(location.name, cmd, gad, msg);
+        // convert the raw payload to the JS type this GAD's DPT expects
+        let value = coerceForDpt(groupAddresses[gad].dpt, msg)
+
+        // log the action - loc, type, target and 'value'. Keep the influx
+        // 'actions.value' field numeric (booleans -> 1/0) so a DPT1 write
+        // doesn't flip the field type and get dropped on a type conflict.
+        let logValue = typeof value === 'boolean' ? (value ? 1 : 0) : value
+        writeActions(location.name, cmd, gad, logValue);
 
         if (cmd == 'write') {
-          // check value?
-          try {
-            // ref endpoint
-            groupAddresses[gad].endpoint.write(msg)
-          } catch (err) {
+          if (typeof value === 'number' && Number.isNaN(value)) {
             logger.error(
-              'Could not write message %j to group address %s, err: %s',
-              err.message,
+              'Ignoring write to %s: payload %j invalid for dpt %s',
               gad,
-              err
+              msg,
+              groupAddresses[gad].dpt
             )
+          } else {
+            try {
+              // ref endpoint
+              groupAddresses[gad].endpoint.write(value)
+            } catch (err) {
+              logger.error(
+                'Could not write message %j to group address %s, err: %s',
+                err.message,
+                gad,
+                err
+              )
+            }
           }
         } else if (cmd == 'read') {
             //console.log(`read topic: ${topic}, message: ${msg}`)
@@ -89,3 +120,4 @@ function mqdisconnect () {
 //module.exports.MQTTconnect = MQTTconnect
 exports.MQTTconnect = MQTTconnect
 exports.mqdisconnect = mqdisconnect
+exports.coerceForDpt = coerceForDpt
