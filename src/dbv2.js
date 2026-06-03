@@ -169,14 +169,15 @@ const influx2 = new Influx.InfluxDB({
 // write for actions
 function writeActionsv2(knxloc, evt, dest, avalue) {
 
-  const date = new Date() // this is UTC
+  // NB: the comma between the write options and the points array is load-bearing.
+  // Without it `{...}[ {...} ]` parses as a property access and write() is called
+  // with undefined - the actions were silently never written.
   influxdb.write(
       {
             org: "HA",
             //precision: 'ms',
             bucket: process.env.BUCKET
-            //database: 'hamon',
-      }
+      },
       [ {
           measurement: 'actions',
           tags: {
@@ -184,8 +185,7 @@ function writeActionsv2(knxloc, evt, dest, avalue) {
             event: evt, // read or write in this case
             groupaddr: dest // targeted gad
           },
-          fields: { value: avalue },
-          timestamp: date
+          fields: { value: avalue }
         } ]
     )
     .catch((error) => {

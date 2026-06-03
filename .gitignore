@@ -3,3 +3,6 @@ yarn-error.log
 .env
 .idea
 .workfolder
+# docs/ kept out of the repo: operational notes reference site/customer
+# identifiers (hostnames, IPs, site names) and must not be published.
+docs/

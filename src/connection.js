@@ -246,6 +246,13 @@ const connection = knx.Connection({
         let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
         logger.error('%s **** ERROR: %s %j', ctime, name, connstatus);
 
+        // clear any pending recovery timer before re-arming: a burst of errors
+        // before the next 'connected' would otherwise orphan earlier timers
+        // (timerHandle is overwritten), and an orphan fires handleTimeout ~15min
+        // later - a spurious full-worker restart even after the link recovered.
+        if (timerHandle != null) {
+            clearTimeout(timerHandle);
+        }
         // set timer for ip changes - changed to 8min based on testing
         // 8min was not long enough for the network to stabilise
         // so changed to 15min - 15 * 60 -> 900

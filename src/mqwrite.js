@@ -1,6 +1,7 @@
 const mqtt = require('mqtt') // added to package.jso
 const logger = require('./logger')
 const { writeActions } = require('./db')
+const { writeActionsv2 } = require('./dbv2')
 
 const MQTTBROKERIP = 'mqtt://localhost' // needs protocol which is mqtt
 //const MQTTBROKERPORT = 1883 // default
@@ -64,7 +65,14 @@ function MQTTconnect(groupAddresses, connection, location) {
         // 'actions.value' field numeric (booleans -> 1/0) so a DPT1 write
         // doesn't flip the field type and get dropped on a type conflict.
         let logValue = typeof value === 'boolean' ? (value ? 1 : 0) : value
-        writeActions(location.name, cmd, gad, logValue);
+        // route to the same InfluxDB version as the events path (connection.js):
+        // influxver == 1 -> v1 (db.js), otherwise v2 (dbv2.js). All instances are
+        // now v2; db.js is kept as the feature-flagged v1 fallback.
+        if (location?.influxver == 1) {
+          writeActions(location.name, cmd, gad, logValue);
+        } else {
+          writeActionsv2(location.name, cmd, gad, logValue);
+        }
 
         if (cmd == 'write') {
           if (typeof value === 'number' && Number.isNaN(value)) {
