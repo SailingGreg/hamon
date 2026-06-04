@@ -1,0 +1,15 @@
+[Unit]
+Description=hamon hung-site freshness detector (replaces kapacitor deadmanv2)
+After=network-online.target docker.service influxdb.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=greg
+Group=greg
+# DRYRUN=1 by default: flip to 0 only after a live-parallel diff against
+# restart.log confirms its decisions match deadmanv2.
+Environment=DRYRUN=1
+WorkingDirectory=/home/greg/hamon
+ExecStart=/home/greg/hamon/freshness-detector.sh
+Nice=5

@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the hamon freshness detector every 5 minutes
+
+[Timer]
+# match deadmanv2's 5-minute cadence; small randomised delay to avoid
+# colliding with the eventcount cron on the influx query path.
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=20
+AccuracySec=10s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
