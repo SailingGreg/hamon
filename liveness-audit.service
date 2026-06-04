@@ -1,0 +1,12 @@
+[Unit]
+Description=hamon liveness/commissioning audit (enabled vs actually-flowing)
+After=network-online.target influxdb.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=greg
+Group=greg
+WorkingDirectory=/home/greg/hamon
+ExecStart=/home/greg/hamon/liveness-audit.sh
+Nice=10

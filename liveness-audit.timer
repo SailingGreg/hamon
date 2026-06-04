@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the hamon liveness audit daily
+
+[Timer]
+# once a day; this is a slow reconciliation, not a recovery loop.
+OnCalendar=*-*-* 07:30:00
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
