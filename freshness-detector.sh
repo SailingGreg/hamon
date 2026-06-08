@@ -38,7 +38,9 @@ ENVFILE="${ENVFILE:-$HAMON/.hamon-backup.env}"   # provides INFLUX_TOKEN
 ORG="${ORG:-HA}"
 BUCKET="${BUCKET:-hamon}"
 THRESH_MIN="${THRESH_MIN:-20}"          # stale if last point older than this (minutes)
-WINDOW="${WINDOW:-6h}"                   # freshness query lookback (>> THRESH_MIN)
+WINDOW="${WINDOW:-24h}"                  # freshness query lookback (>> THRESH_MIN);
+                                         # must exceed worst tolerated outage or a
+                                         # hard-down site ages out of the report
 DRYRUN="${DRYRUN:-1}"                     # 1 = report only (default), 0 = act
 SLACK_WEBHOOK="${SLACK_WEBHOOK:-}"        # optional; empty = no Slack
 
