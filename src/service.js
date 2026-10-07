@@ -101,8 +101,11 @@ function start_worker(path, influxver, loc) {
     })
     threads.add(worker)
 
+    // an uncaught error (e.g. knx rejecting a reserved address) ends this
+    // worker - restart just this site rather than taking down hamon
     worker.on('error', (err) => {
-      throw err;
+      logger.error(`Worker error: ${loc.name} - ${err}`)
+      requestRestart(loc.name);
     })
     worker.on('message', (data) => {
        if (data && data.connected) { // KNX link up - clear the back-off
