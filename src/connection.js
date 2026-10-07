@@ -113,7 +113,7 @@ const connection = knx.Connection({
   ipPort: port,
   // these set based on device type
   //forceTunneling: false,
-  forceTunneling: device == "genric" ? true : false,
+  forceTunneling: device == "generic" ? true : false,
   suppress_ack_ldatareq: (device == "loxone" || device == "eibport") ? true : false,
   physAddr: phyAddr,
   loglevel: logging,
