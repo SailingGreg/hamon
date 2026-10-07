@@ -75,11 +75,10 @@ const knxAddr = dnsSync.resolve(dns)
 logger.info('KNXnet/IP %s -> %s', dns, knxAddr)
 
 // unresolved: knx would silently fall back to the multicast default and look
-// 'connected' with no data - so fail and let the parent retry (with back-off)
+// 'connected' with no data - so fail; service.js logs it and retries with
+// back-off (thrown rather than logged here as the worker exits before flush)
 if (knxAddr == null) {
-    logger.error('DNS lookup failed for %s (%s) - will retry', name, dns);
-    parentPort.postMessage( name );
-    process.exit(1);
+    throw new Error(`DNS lookup failed for ${dns}`);
 }
 
 //console.log("connection.js %s", path);
