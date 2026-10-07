@@ -122,6 +122,7 @@ const connection = knx.Connection({
         ld = new Date().getTime(); // time
         let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
         logger.info('%s Connected - %s (%d)', ctime, name, ld - last_err);
+        parentPort.postMessage({ connected: name }); // resets restart back-off
 
         if (timerHandle != null) {
             clearTimeout(timerHandle);

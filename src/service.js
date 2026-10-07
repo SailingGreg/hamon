@@ -15,6 +15,29 @@ let firstRun = true
 //var dnsEntry = ''
 const threads = new Set()
 
+// restart back-off for sites that stay down: the first RESTART_FREE restarts
+// are immediate, then the delay doubles from BACKOFF_BASE up to BACKOFF_MAX.
+// The count resets when the worker reports a successful KNX connection.
+const RESTART_FREE = 3
+const BACKOFF_BASE = 15 * 60 * 1000 // 15min
+const BACKOFF_MAX = 4 * 60 * 60 * 1000 // 4h
+const failures = {} // consecutive restarts without a connection, by name
+const pending = {} // back-off timers, by name
+
+function backoffDelay(count) {
+    if (count <= RESTART_FREE) return 0;
+    return Math.min(BACKOFF_BASE * 2 ** (count - RESTART_FREE - 1), BACKOFF_MAX);
+}
+
+// cancel a pending back-off restart (config change, kpipe restart)
+function cancelPending(name) {
+    if (pending[name] != null) {
+        clearTimeout(pending[name]);
+        delete pending[name];
+        logger.info(`Back-off cancelled: ${name}`)
+    }
+}
+
 // need to add try/except
 const getDoc = (hamonConfig) => yaml.load(fs.readFileSync(hamonConfig, 'utf8'));
 
@@ -82,7 +105,11 @@ function start_worker(path, influxver, loc) {
       throw err;
     })
     worker.on('message', (data) => {
-       restart (data); // pass location
+       if (data && data.connected) { // KNX link up - clear the back-off
+           failures[data.connected] = 0;
+       } else {
+           requestRestart(data); // worker timed out - pass location
+       }
     });
     worker.on('exit', () => {
       threads.delete(worker)
@@ -117,6 +144,28 @@ function compareLoc(oldLoc, newLoc) {
     if (oldLoc['config'] != newLoc['config']) change = true;
 
     return change; // return flag
+}
+
+// worker asked to be restarted - apply back-off if it keeps failing
+function requestRestart(name) {
+    failures[name] = (failures[name] || 0) + 1;
+    const delay = backoffDelay(failures[name]);
+    if (delay == 0) {
+        restart(name);
+        return;
+    }
+    cancelPending(name);
+    logger.info(`Back-off: ${name} restart ${failures[name]} in ${delay / 60000}min`)
+    pending[name] = setTimeout(() => {
+        delete pending[name];
+        // the config may have changed while waiting
+        const loc = findLoc(name, originalDoc);
+        if (loc != null && loc["enabled"] == true) {
+            restart(name);
+        } else {
+            logger.info(`Back-off: ${name} no longer enabled, not restarting`)
+        }
+    }, delay);
 }
 
 // start/restart the location
@@ -180,6 +229,8 @@ async function ConnectionService(firstrun, path, doc) {
                 // restart so terminate and start
                 let diff = stats.mtimeMs - oldLoc["mtime"];
                 logger.info(`Change so restarting: ${loc.name} ${diff}`)
+                cancelPending(loc.name);
+                failures[loc.name] = 0;
 
                 //terminate and restart
                 // we don't need to delete as it is done on exit
@@ -266,7 +317,9 @@ async function runService(path, hamonConfig) {
                         logger.info("Terminating existing worker");
                         wrk.postMessage({ exit: true });
 
-                        // and now restart
+                        // and now restart - immediately, overriding any
+                        // back-off wait (the failure count is kept)
+                        cancelPending(ksite);
                         restart(ksite);
                     }
                 } else {
