@@ -7,8 +7,8 @@ Wants=network-online.target
 Type=oneshot
 User=greg
 Group=greg
-# DRYRUN=1 by default: flip to 0 only after a live-parallel diff against
-# restart.log confirms its decisions match deadmanv2.
+# Live (DRYRUN=0) since 2026-10-08: replaced kapacitor deadmanv2, which is
+# disabled along with the kapacitor service.  DRYRUN=1 = report only.
 Environment=DRYRUN=0
 WorkingDirectory=/home/greg/hamon
 ExecStart=/home/greg/hamon/freshness-detector.sh
