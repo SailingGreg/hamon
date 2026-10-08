@@ -46,7 +46,8 @@ On the Pi (Raspberry Pi OS Lite 64-bit, Bookworm or Trixie, both OpenVPN 2.6), a
 `eth0` below is the Pi's LAN interface; use `wlan0` if it is on Wi-Fi (wired is preferred on site):
 
 ```bash
-apt install -y openvpn iptables-persistent
+apt install -y openvpn iptables-persistent fake-hwclock
+systemctl enable fake-hwclock-load fake-hwclock-save   # no RTC: keeps the clock past cert start dates if NTP is blocked
 install -m 600 <name>.ovpn /etc/openvpn/client/pivpn.conf
 systemctl enable --now openvpn-client@pivpn          # reconnects by itself (keepalive)
 
