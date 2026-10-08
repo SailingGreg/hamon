@@ -99,6 +99,19 @@ docker exec pivpn-server cat /tmp/pivpn-status.log  # connected clients, refresh
 docker logs --since 1h pivpn-server
 ```
 
+Site-Pi health: `hapi-collect.timer` (every 5 min, as greg) fetches each Pi's `hapi-agent`
+status over ssh (`pivpn@10.8.0.N`, prod's key) and publishes it retained on the local broker
+as `hapi/<name>/status`, with `reachable: false` for a Pi that doesn't answer:
+
+```bash
+mosquitto_sub -t 'hapi/+/status' -v -W 3       # current state of every Pi
+journalctl -u hapi-collect -n 20               # one line per Pi per run
+```
+
+Install once: `install -m 644 hapi-collect.service hapi-collect.timer /etc/systemd/system/`,
+then `systemctl daemon-reload && systemctl enable --now hapi-collect.timer`. A new Pi needs
+prod's ssh key in its `~pivpn/.ssh/authorized_keys`.
+
 ## Remove / revoke a site
 
 ```bash
