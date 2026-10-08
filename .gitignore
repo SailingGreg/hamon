@@ -10,3 +10,5 @@ docs/
 freshness-thresholds.conf
 # freshness-detector secrets (SLACK_WEBHOOK)
 .freshness.env
+# per-site VPN launchers/configs on the servers (site names, PSKs) - never commit
+vpn/
