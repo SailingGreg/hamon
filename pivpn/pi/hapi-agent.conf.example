@@ -1,0 +1,22 @@
+# /etc/hapi/agent.conf  -  hapi-agent settings (all optional; shown with defaults)
+[agent]
+# Gateway choice.  Leave all three empty to discover; set gateway_serial (from
+# `hapi-agent discover`) if the site has more than one tunnelling gateway, or
+# gateway_ip to skip discovery (e.g. multicast blocked) - give it a DHCP
+# reservation then.
+gateway_ip =
+gateway_serial =
+gateway_mac =
+
+tun_if = tun0
+vpn_server = 10.8.0.1
+search_timeout = 3
+
+# Optional status report (retained JSON).  Off unless mqtt_host is set; the
+# broker must accept the Pi on the VPN with a login and an ACL limited to
+# hapi/<host>/#.  chmod 600 this file if it holds a password.
+mqtt_host =
+mqtt_port = 1883
+mqtt_user =
+mqtt_password =
+mqtt_topic = hapi/{host}/status

@@ -59,6 +59,29 @@ netfilter-persistent save
 
 The gateway should have a DHCP reservation so `GW` doesn't change.
 
+**Or let `hapi-agent` do the forwarding** (in `pi/`, Python 3 stdlib only). It finds the
+gateway with a KNXnet/IP search, writes the two rules (own chains `HAPI-DNAT`/`HAPI-SNAT`,
+saved), and every 10 minutes follows the gateway if its IP changes:
+
+```bash
+apt install -y conntrack
+install -m 755 hapi-agent /usr/local/sbin/
+install -m 644 hapi-agent.service hapi-agent.timer /etc/systemd/system/
+install -d /etc/hapi && install -m 600 hapi-agent.conf.example /etc/hapi/agent.conf
+systemctl daemon-reload
+hapi-agent discover          # what answers on the LAN
+hapi-agent test              # KNX tunnel connect/state/disconnect (takes a slot briefly)
+systemctl enable --now hapi-agent.timer
+hapi-agent status            # last result: VPN, gateway, forward, errors
+```
+
+With several tunnelling gateways it refuses to guess: set `gateway_serial` in
+`/etc/hapi/agent.conf`. If multicast is blocked, set `gateway_ip`. If the gateway vanishes
+it keeps the last forward and reports the problem. The timer run never takes a tunnel slot
+(it only sends a description request). `hapi-agent test 10.8.0.N` run on the server tests
+the whole path the way hamon connects (NAT mode). `fake-gateway.py` stands in for a gateway
+on the bench.
+
 Then check, and point hamon at the tunnel IP:
 
 ```bash

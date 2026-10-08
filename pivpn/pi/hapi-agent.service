@@ -1,0 +1,8 @@
+[Unit]
+Description=hapi-agent: KNX gateway discovery, forwarding and status
+Wants=network-online.target
+After=network-online.target openvpn-client@pivpn.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hapi-agent run
