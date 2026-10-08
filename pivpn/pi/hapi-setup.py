@@ -27,7 +27,6 @@ import html
 import ipaddress
 import json
 import os
-import secrets
 import socket
 import subprocess
 import sys
@@ -47,7 +46,6 @@ try:
 except OSError:
     pass
 SETUP = cp["setup"]
-CSRF = secrets.token_urlsafe(16)
 FAILS = {"n": 0, "until": 0.0}
 FLASH = {"msg": "", "detail": ""}
 LOCK = threading.Lock()
@@ -56,6 +54,14 @@ LOCK = threading.Lock()
 def setup_code():
     with open(SETUP["code_file"]) as f:
         return f.read().strip()
+
+
+def csrf_token():
+    """Form token: derived from the setup code, so it survives a restart
+    of the page (no 'page expired' after a reboot) but can't be forged
+    without the code."""
+    return hmac.new(setup_code().encode(), b"hapi-setup form",
+                    "sha256").hexdigest()[:32]
 
 
 def lan_networks():
@@ -143,7 +149,7 @@ def button(action, label, extra="", cls=""):
         if extra else ""
     return ('<form method="post" action="%s"><input type="hidden" '
             'name="csrf" value="%s">%s<button%s>%s</button></form>'
-            % (action, CSRF, hidden, ' class="%s"' % cls if cls else "",
+            % (action, csrf_token(), hidden, ' class="%s"' % cls if cls else "",
                esc(label)))
 
 
@@ -303,7 +309,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         n = int(self.headers.get("Content-Length") or 0)
         form = parse_qs(self.rfile.read(min(n, 4096)).decode())
-        if not hmac.compare_digest(form.get("csrf", [""])[0], CSRF):
+        if not hmac.compare_digest(form.get("csrf", [""])[0], csrf_token()):
             self.send(403, "Page expired - reload and try again.\n",
                       "text/plain")
             return
