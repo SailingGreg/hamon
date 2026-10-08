@@ -1,0 +1,18 @@
+// Node-RED settings for hamon automation.  Minimal on purpose: anything not set
+// here takes the Node-RED default.  setup.sh fills in the @...@ values; the
+// generated settings.js holds secrets and lives only in the data directory.
+module.exports = {
+    uiPort: 1880,
+    uiHost: "127.0.0.1",         // only nginx (TLS) reaches the editor
+    httpAdminRoot: "/nodered",    // served at https://<host>/nodered/
+    flowFile: "flows.json",
+    credentialSecret: "@CREDENTIAL_SECRET@",
+    // login required: the editor can publish to the local MQTT broker, i.e.
+    // write to any site's KNX bus (password in ~/node-red/.admin-password)
+    adminAuth: {
+        type: "credentials",
+        users: [{ username: "admin", password: "@ADMIN_HASH@", permissions: "*" }]
+    },
+    editorTheme: { projects: { enabled: false } },
+    logging: { console: { level: "info", metrics: false, audit: false } }
+}

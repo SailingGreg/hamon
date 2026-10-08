@@ -1,0 +1,166 @@
+[
+ {
+  "id": "tab",
+  "type": "tab",
+  "label": "hamon POC: scheduled KNX write",
+  "disabled": false,
+  "info": "Publishes to hamon's MQTT command topic knx/<site>/<g>/<a>/<d>/write.\nhamon converts the payload by the GA's DPT (DPT1: On/Off/1/0/true).\nretain MUST stay false or hamon replays the write on every reconnect.\nTopic is a placeholder until a real site + safe GA is chosen."
+ },
+ {
+  "id": "note",
+  "type": "comment",
+  "z": "tab",
+  "name": "Placeholder topic knx/poc/1/1/1/write - change site/GA in the three injects",
+  "info": "",
+  "x": 300,
+  "y": 40,
+  "wires": []
+ },
+ {
+  "id": "on",
+  "type": "inject",
+  "z": "tab",
+  "name": "On at 18:00",
+  "props": [
+   {
+    "p": "payload"
+   },
+   {
+    "p": "topic",
+    "vt": "str"
+   }
+  ],
+  "repeat": "",
+  "crontab": "00 18 * * *",
+  "once": false,
+  "onceDelay": 0.1,
+  "topic": "knx/poc/1/1/1/write",
+  "payload": "On",
+  "payloadType": "str",
+  "x": 180,
+  "y": 100,
+  "wires": [
+   [
+    "out",
+    "dbg"
+   ]
+  ]
+ },
+ {
+  "id": "off",
+  "type": "inject",
+  "z": "tab",
+  "name": "Off at 23:00",
+  "props": [
+   {
+    "p": "payload"
+   },
+   {
+    "p": "topic",
+    "vt": "str"
+   }
+  ],
+  "repeat": "",
+  "crontab": "00 23 * * *",
+  "once": false,
+  "onceDelay": 0.1,
+  "topic": "knx/poc/1/1/1/write",
+  "payload": "Off",
+  "payloadType": "str",
+  "x": 180,
+  "y": 160,
+  "wires": [
+   [
+    "out",
+    "dbg"
+   ]
+  ]
+ },
+ {
+  "id": "test",
+  "type": "inject",
+  "z": "tab",
+  "name": "Test: On now (click)",
+  "props": [
+   {
+    "p": "payload"
+   },
+   {
+    "p": "topic",
+    "vt": "str"
+   }
+  ],
+  "repeat": "",
+  "crontab": "",
+  "once": false,
+  "onceDelay": 0.1,
+  "topic": "knx/poc/1/1/1/write",
+  "payload": "On",
+  "payloadType": "str",
+  "x": 180,
+  "y": 220,
+  "wires": [
+   [
+    "out",
+    "dbg"
+   ]
+  ]
+ },
+ {
+  "id": "out",
+  "type": "mqtt out",
+  "z": "tab",
+  "name": "to hamon (not retained)",
+  "topic": "",
+  "qos": "1",
+  "retain": "false",
+  "respTopic": "",
+  "contentType": "",
+  "userProps": "",
+  "correl": "",
+  "expiry": "",
+  "broker": "brk",
+  "x": 470,
+  "y": 160,
+  "wires": []
+ },
+ {
+  "id": "dbg",
+  "type": "debug",
+  "z": "tab",
+  "name": "sent",
+  "active": true,
+  "tosidebar": true,
+  "console": true,
+  "complete": "true",
+  "targetType": "full",
+  "x": 430,
+  "y": 220,
+  "wires": []
+ },
+ {
+  "id": "brk",
+  "type": "mqtt-broker",
+  "name": "local mosquitto",
+  "broker": "localhost",
+  "port": "1883",
+  "clientid": "nodered-poc",
+  "autoConnect": true,
+  "usetls": false,
+  "protocolVersion": "4",
+  "keepalive": "60",
+  "cleansession": true,
+  "autoUnsubscribe": true,
+  "birthTopic": "",
+  "birthQos": "0",
+  "birthPayload": "",
+  "closeTopic": "",
+  "closeQos": "0",
+  "closePayload": "",
+  "willTopic": "",
+  "willQos": "0",
+  "willPayload": "",
+  "userProps": "",
+  "sessionExpiry": ""
+ }
+]
