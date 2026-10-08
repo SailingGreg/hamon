@@ -39,8 +39,16 @@ cd $DIR
 cp /etc/kapacitor/kapacitor.conf .
 cp /etc/grafana/grafana.ini .
 
+# Node-RED flows + settings (if installed), archived as node-red/data/...
+# settings.js holds the credential secret + admin hash a restore needs
+NRDATA=node-red/data
+nr=()
+if [ -d /home/greg/$NRDATA ]; then
+	nr=(-C /home/greg $NRDATA)
+fi
+
 #tar cf influx.${DATE} mysnapshot grafana.db *.ini
-tar cf influx.${DATE} mysnapshot grafana.db *.ini *.conf
+tar cf influx.${DATE} --exclude="$NRDATA/.npm" mysnapshot grafana.db *.ini *.conf "${nr[@]}"
 rc=$?
 
 # clean up
