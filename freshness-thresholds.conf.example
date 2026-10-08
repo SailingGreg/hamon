@@ -1,0 +1,11 @@
+# freshness-detector thresholds - copy to freshness-thresholds.conf (gitignored:
+# it names sites) beside freshness-detector.sh.  `<key> <minutes>` per line.
+
+# required: the detector will not scan without all three
+default       20    # stale after this long without a knx2 point
+cooldown      20    # wait after the first restart of a stale spell, doubling ...
+cooldown_max  240   # ... up to this cap (matches hamon's own 4h back-off cap)
+
+# optional per-site thresholds (location name exactly as in Influx), for
+# low-traffic sites whose normal quiet spells are longer than `default`
+#example_site 720

@@ -8,3 +8,5 @@ yarn-error.log
 docs/
 # freshness-detector per-site thresholds: names sites, stays local
 freshness-thresholds.conf
+# freshness-detector secrets (SLACK_WEBHOOK)
+.freshness.env
