@@ -31,7 +31,8 @@ This issues a certificate and a per-client `tls-crypt-v2` key, writes `ccd/<name
 creates `~/pivpn/clients/<name>.ovpn`. Copy that file to the Pi over ssh/scp only
 (never email): it is the Pi's identity.
 
-On the Pi (Raspberry Pi OS Lite 64-bit, Bookworm = OpenVPN 2.6), as root:
+On the Pi (Raspberry Pi OS Lite 64-bit, Bookworm or Trixie, both OpenVPN 2.6), as root.
+`eth0` below is the Pi's LAN interface; use `wlan0` if it is on Wi-Fi (wired is preferred on site):
 
 ```bash
 apt install -y openvpn iptables-persistent
