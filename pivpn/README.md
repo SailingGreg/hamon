@@ -84,8 +84,12 @@ docker exec --user "$(id -u)" -e EASYRSA_PKI=/etc/pivpn/pki -e EASYRSA_BATCH=1 \
   pivpn-server /usr/share/easy-rsa/easyrsa renew <name>
 ```
 
-Then re-run `pivpn-add <name> …` to refresh the `.ovpn` and copy it to the Pi. The server
-certificate also lasts 825 days. The CA and CRL last 10 years.
+Then re-run `pivpn-add <name> …` to refresh the `.ovpn` and copy it to the Pi. With
+easy-rsa 3.1 (in the image) the old certificate stays valid until revoked, so once the Pi is on
+the new one, run `easyrsa revoke-renewed <name>` and `easyrsa gen-crl` the same way.
+
+The **server** certificate also lasts 825 days, and when it expires every site drops, so renew it
+(`renew server`, then `docker restart pivpn-server`) well before. The CA and CRL last 10 years.
 
 ## Server lifecycle
 
