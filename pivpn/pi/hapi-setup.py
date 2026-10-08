@@ -4,7 +4,7 @@
 # Installed on the Pi as /usr/local/sbin/hapi-setup, run by hapi-setup.service.
 #
 # The installer opens http://<hostname>.local/ on a laptop on the site network,
-# signs in with the setup code from the box's label, and sees: VPN state, the
+# signs in as admin with the setup code from the box's label, and sees: VPN state, the
 # KNX gateways the box can see, which one is in use, and any problem.  With
 # more than one gateway they pick the right one, now or later (e.g. after a
 # gateway is replaced); they can also search again and run a connection test.
@@ -13,7 +13,7 @@
 # Kept small on purpose:
 #   - answers only clients on the Pi's own LAN subnets (never the VPN side);
 #   - needs the setup code printed on the box's label (as KNX Secure devices
-#     carry their key), HTTP basic auth with any user name, and a one-minute
+#     carry their key), HTTP basic auth as user admin, and a one-minute
 #     lock-out after five wrong codes;
 #   - runs unprivileged; the only root action is `sudo hapi-agent ...`.
 #
@@ -274,17 +274,18 @@ class Handler(BaseHTTPRequestHandler):
         good = False
         if auth.startswith("Basic "):
             try:
-                given = base64.b64decode(auth[6:]).decode().split(":", 1)[1]
-                good = hmac.compare_digest(given.strip(), setup_code())
-            except (ValueError, IndexError, UnicodeDecodeError):
+                user, given = base64.b64decode(auth[6:]).decode().split(":", 1)
+                good = hmac.compare_digest(given.strip(), setup_code()) \
+                    and user.strip().lower() == "admin"
+            except (ValueError, UnicodeDecodeError):
                 good = False
         if not good:
             if auth:
                 FAILS["n"] += 1
                 if FAILS["n"] >= 5:
                     FAILS["n"], FAILS["until"] = 0, time.time() + 60
-            self.send(401, "Enter the setup code from the box's label "
-                      "(any user name).\n", "text/plain",
+            self.send(401, "Sign in as admin with the setup code from the "
+                      "box's label.\n", "text/plain",
                       {"WWW-Authenticate": 'Basic realm="hapi setup"'})
             return False
         FAILS["n"] = 0

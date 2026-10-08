@@ -86,7 +86,7 @@ the whole path the way hamon connects (NAT mode). `fake-gateway.py` stands in fo
 on the bench.
 
 **Installer's setup page** (`hapi-setup.py`, port 80): from a laptop on the site network,
-`http://<hostname>.local/`, signed in with any user name and the setup code printed on the
+`http://<hostname>.local/`, signed in as `admin` with the setup code printed on the
 box's label (as KNX Secure devices carry their key). It shows the link to hamon, the
 gateway in use and every gateway seen, and can choose a gateway, search again or run the
 connection test. It answers only clients on the Pi's own LAN subnets (never over the VPN),
