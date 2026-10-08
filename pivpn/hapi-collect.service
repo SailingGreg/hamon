@@ -1,0 +1,12 @@
+[Unit]
+Description=hapi-collect: site-Pi status over the VPN to MQTT (hapi/<name>/status)
+After=network-online.target docker.service mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=greg
+Group=greg
+WorkingDirectory=/home/greg/hamon
+ExecStart=/home/greg/hamon/pivpn/hapi-collect
+Nice=5

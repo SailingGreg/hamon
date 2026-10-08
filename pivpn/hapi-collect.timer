@@ -1,0 +1,14 @@
+[Unit]
+Description=Collect site-Pi status every 5 minutes
+
+[Timer]
+# the Pis' hapi-agent refreshes its status every 10 minutes; 5 here keeps
+# reachability current.
+OnBootSec=4min
+OnUnitActiveSec=5min
+RandomizedDelaySec=20
+AccuracySec=10s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
