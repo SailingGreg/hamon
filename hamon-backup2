@@ -39,13 +39,17 @@ cd $DIR
 cp /etc/kapacitor/kapacitor.conf .
 cp /etc/grafana/grafana.ini .
 
-# Node-RED flows + settings (if installed), archived as node-red/data/...
-# settings.js holds the credential secret + admin hash a restore needs
+# app data under /home/greg (if present), archived by relative path:
+#   node-red/data - flows + settings.js (credential secret + admin hash)
+#   pivpn         - Pi-VPN server config, ccd and PKI incl. the CA key
 NRDATA=node-red/data
 nr=()
-if [ -d /home/greg/$NRDATA ]; then
-	nr=(-C /home/greg $NRDATA)
-fi
+for d in $NRDATA pivpn; do
+	if [ -d /home/greg/$d ]; then
+		nr+=($d)
+	fi
+done
+[ ${#nr[@]} -gt 0 ] && nr=(-C /home/greg "${nr[@]}")
 
 #tar cf influx.${DATE} mysnapshot grafana.db *.ini
 tar cf influx.${DATE} --exclude="$NRDATA/.npm" mysnapshot grafana.db *.ini *.conf "${nr[@]}"
