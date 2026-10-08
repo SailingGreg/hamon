@@ -34,3 +34,18 @@
     missingok
     notifempty
 }
+
+# freshness-detector restart history (STALE/HOLD lines; replaces restart.log for
+# automatic restarts).  The script appends per line, so a plain move + create is
+# safe.  Small (~45K/day), so keep a year.
+/home/greg/hamon/alerts/freshness.log {
+    su greg greg
+    monthly
+    rotate 12
+    dateext
+    compress
+    delaycompress
+    create 0644 greg greg
+    missingok
+    notifempty
+}
