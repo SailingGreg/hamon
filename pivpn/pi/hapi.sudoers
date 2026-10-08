@@ -1,0 +1,4 @@
+# /etc/sudoers.d/hapi  (install -m 440): the setup page (user hapi) and remote
+# admin over the VPN (user pivpn) may run hapi-agent - and only that - as root.
+hapi  ALL=(root) NOPASSWD: /usr/local/sbin/hapi-agent
+pivpn ALL=(root) NOPASSWD: /usr/local/sbin/hapi-agent

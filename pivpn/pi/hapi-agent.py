@@ -8,18 +8,22 @@
 # 224.0.23.12:3671), keeps the forwarding rules pointing at it if its address
 # changes, and reports what it sees.  Python 3 standard library only.
 #
-#   hapi-agent discover        list KNX/IP devices answering a search
+#   hapi-agent discover [--json]  list KNX/IP devices answering a search
 #   hapi-agent test [IP]       full tunnelling test: connect, state, disconnect
 #                              (uses a tunnel slot for a moment; install time)
 #   hapi-agent run             discover/select, apply forwarding, light probe,
 #                              write the status file (+ MQTT if configured);
 #                              what the timer runs - it never takes a slot
 #   hapi-agent status          print the last status file
+#   hapi-agent pin SERIAL      use this gateway (sets gateway_serial), then run
+#   hapi-agent unpin           back to automatic choice, then run
 #
 # Gateway choice, in order: gateway_ip in the config (manual), a pinned
 # gateway_serial/gateway_mac, the gateway chosen last time (followed if its IP
 # changes), else the only tunnelling-capable device found.  Several candidates
-# and nothing to choose by is an error: pin one by serial.
+# and nothing to choose by is an error: the installer picks one on the setup
+# page (hapi-setup.py) or we `pin` it remotely.  Every device seen is listed in
+# the status file ("gateways"), so the choice can be made from the server.
 #
 # Config: /etc/hapi/agent.conf ([agent] section, all keys optional; see
 # hapi-agent.conf.example).  State: /var/lib/hapi/state.json.
@@ -364,10 +368,49 @@ def select(conf, state, devices):
         return tunnelling[0], "only tunnelling device", None
     if not tunnelling:
         return None, None, "no tunnelling-capable KNX/IP gateway found"
-    return None, None, "%d tunnelling gateways found - pin one with " \
-        "gateway_serial: %s" % (len(tunnelling), ", ".join(
-            "%s (%s, %s)" % (d.get("serial"), d.get("name"), d["ip"])
-            for d in tunnelling))
+    return None, None, "%d tunnelling gateways found - choose one on the " \
+        "setup page or with `hapi-agent pin SERIAL`: %s" % (
+            len(tunnelling), ", ".join(
+                "%s (%s, %s)" % (d.get("serial"), d.get("name"), d["ip"])
+                for d in tunnelling))
+
+
+def summary(d):
+    keys = ("ip", "name", "serial", "mac", "individual_address", "tunnelling")
+    return {k: d.get(k) for k in keys}
+
+
+def set_conf(key, value):
+    """Set one [agent] key in CONF_FILE, keeping its comments and layout."""
+    try:
+        with open(CONF_FILE) as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        lines = ["[agent]"]
+    for i, line in enumerate(lines):
+        if line.split("=", 1)[0].strip() == key and "=" in line:
+            lines[i] = "%s = %s" % (key, value)
+            break
+    else:
+        at = next((i for i, l in enumerate(lines)
+                   if l.strip() == "[agent]"), None)
+        if at is None:
+            lines.append("[agent]")
+            at = len(lines) - 1
+        lines.insert(at + 1, "%s = %s" % (key, value))
+    os.makedirs(os.path.dirname(CONF_FILE), exist_ok=True)
+    try:   # keep owner and mode (root:hapi 0640 lets the setup page read it)
+        st = os.stat(CONF_FILE)
+        mode, owner = st.st_mode & 0o777, (st.st_uid, st.st_gid)
+    except FileNotFoundError:
+        mode, owner = 0o600, None
+    tmp = CONF_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    os.chmod(tmp, mode)
+    if owner:
+        os.chown(tmp, *owner)
+    os.replace(tmp, CONF_FILE)
 
 
 # ---------------------------------------------------------------- MQTT
@@ -403,8 +446,11 @@ def mqtt_publish(host, port, topic, payload, user="", password="",
 
 # ---------------------------------------------------------------- commands
 
-def cmd_discover(conf):
+def cmd_discover(conf, as_json=False):
     devices = discover(float(conf["search_timeout"]))
+    if as_json:
+        print(json.dumps([summary(d) for d in devices], indent=2))
+        return 0
     if not devices:
         print("no KNX/IP devices answered")
         return 1
@@ -442,6 +488,8 @@ def cmd_run(conf):
     devices = [] if conf["gateway_ip"] else discover(
         float(conf["search_timeout"]))
     st["discovered"] = len(devices)
+    st["gateways"] = [summary(d) for d in devices]
+    st["pinned"] = conf["gateway_serial"] or conf["gateway_mac"] or None
     dev, how, err = select(conf, state, devices)
     if err:
         st["errors"].append(err)
@@ -483,11 +531,35 @@ def cmd_run(conf):
     return 0 if st["ok"] else 1
 
 
+def cmd_pin(serial):
+    """Pin a gateway by serial ("" = automatic), then apply it."""
+    serial = serial.lower().replace(":", "").replace("-", "")
+    if serial and (len(serial) != 12 or
+                   any(c not in "0123456789abcdef" for c in serial)):
+        print("serial must be 12 hex digits (from `hapi-agent discover`)",
+              file=sys.stderr)
+        return 2
+    set_conf("gateway_serial", serial)
+    if not serial:
+        set_conf("gateway_mac", "")
+    # a new choice replaces the remembered one
+    try:
+        os.remove(STATE_FILE)
+    except FileNotFoundError:
+        pass
+    print("gateway %s" % ("pinned to " + serial if serial else "automatic"))
+    return cmd_run(load_conf())
+
+
 def main(argv):
     conf = load_conf()
     cmd = argv[1] if len(argv) > 1 else "run"
     if cmd == "discover":
-        return cmd_discover(conf)
+        return cmd_discover(conf, "--json" in argv[2:])
+    if cmd == "pin" and len(argv) == 3:
+        return cmd_pin(argv[2])
+    if cmd == "unpin":
+        return cmd_pin("")
     if cmd == "test":
         return cmd_test(conf, argv[2] if len(argv) > 2 else None)
     if cmd == "run":
@@ -495,7 +567,8 @@ def main(argv):
     if cmd == "status":
         print(json.dumps(load_json(STATUS_FILE), indent=2))
         return 0
-    print("usage: hapi-agent discover|test [IP]|run|status",
+    print("usage: hapi-agent discover [--json]|test [IP]|run|status|"
+          "pin SERIAL|unpin",
           file=sys.stderr)
     return 2
 

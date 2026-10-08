@@ -20,3 +20,11 @@ mqtt_port = 1883
 mqtt_user =
 mqtt_password =
 mqtt_topic = hapi/{host}/status
+
+# Installer's setup page (hapi-setup): http://<hostname>.local/ from the site
+# LAN only, signed in with the setup code from the box's label (code_file,
+# root:hapi 0640).  This file must then be root:hapi 0640 so the page can
+# read it.
+[setup]
+port = 80
+code_file = /etc/hapi/setup-code

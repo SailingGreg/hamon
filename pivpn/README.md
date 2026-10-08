@@ -76,12 +76,32 @@ systemctl enable --now hapi-agent.timer
 hapi-agent status            # last result: VPN, gateway, forward, errors
 ```
 
-With several tunnelling gateways it refuses to guess: set `gateway_serial` in
-`/etc/hapi/agent.conf`. If multicast is blocked, set `gateway_ip`. If the gateway vanishes
+Every gateway it sees is listed in its status (`gateways`). With several tunnelling
+gateways it refuses to guess: the installer picks one on the setup page (below), or from
+the server `ssh pivpn@10.8.0.N sudo hapi-agent pin <serial>` (`unpin` = automatic again;
+the sudo rule allows only `hapi-agent`, with no password). If multicast is blocked, set `gateway_ip`. If the gateway vanishes
 it keeps the last forward and reports the problem. The timer run never takes a tunnel slot
 (it only sends a description request). `pi/hapi-agent.py test 10.8.0.N` run on the server tests
 the whole path the way hamon connects (NAT mode). `fake-gateway.py` stands in for a gateway
 on the bench.
+
+**Installer's setup page** (`hapi-setup.py`, port 80): from a laptop on the site network,
+`http://<hostname>.local/`, signed in with any user name and the setup code printed on the
+box's label (as KNX Secure devices carry their key). It shows the link to hamon, the
+gateway in use and every gateway seen, and can choose a gateway, search again or run the
+connection test. It answers only clients on the Pi's own LAN subnets (never over the VPN),
+locks out for a minute after five wrong codes, and runs as the unprivileged `hapi` user,
+whose only root action is `sudo hapi-agent`.
+
+```bash
+useradd --system --no-create-home --shell /usr/sbin/nologin hapi
+install -m 755 hapi-setup.py /usr/local/sbin/hapi-setup
+install -m 644 hapi-setup.service /etc/systemd/system/
+visudo -cf hapi.sudoers && install -m 440 hapi.sudoers /etc/sudoers.d/hapi
+install -m 640 -o root -g hapi setup-code /etc/hapi/setup-code   # three random words; print it on the label
+chown root:hapi /etc/hapi/agent.conf && chmod 640 /etc/hapi/agent.conf
+systemctl daemon-reload && systemctl enable --now hapi-setup
+```
 
 Then check, and point hamon at the tunnel IP:
 

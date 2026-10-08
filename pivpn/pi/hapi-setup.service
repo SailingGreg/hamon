@@ -1,0 +1,19 @@
+[Unit]
+Description=hapi-setup: installer's setup page (LAN only, setup code on the label)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=hapi
+Group=hapi
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+ExecStart=/usr/local/sbin/hapi-setup
+
+Restart=always
+RestartSec=10
+# no ProtectSystem/NoNewPrivileges: the page runs `sudo hapi-agent`, which
+# must write /etc/hapi, /var/lib/hapi, /run/hapi and the saved iptables rules
+
+[Install]
+WantedBy=multi-user.target
