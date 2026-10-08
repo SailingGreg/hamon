@@ -1,0 +1,20 @@
+# logrotate config for the hamon winston logs - install as /etc/logrotate.d/hamon
+#
+# copytruncate, not create/postrotate: every worker thread opens its own winston
+# File transport on these files (dozens of fds), all with O_APPEND, so after an
+# in-place truncate each writer carries on at the new end of file - no hamon
+# restart or signal needed.  Lines written during the copy are lost, which at
+# daily rotation is a second or so of info logging.
+#
+# su: src/ is group-writable, which logrotate refuses to rotate in as root.
+
+/home/greg/hamon/src/combined.log /home/greg/hamon/src/error.log {
+    su greg greg
+    daily
+    rotate 30
+    dateext
+    compress
+    copytruncate
+    missingok
+    notifempty
+}
