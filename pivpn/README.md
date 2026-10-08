@@ -31,6 +31,17 @@ This issues a certificate and a per-client `tls-crypt-v2` key, writes `ccd/<name
 creates `~/pivpn/clients/<name>.ovpn`. Copy that file to the Pi over ssh/scp only
 (never email): it is the Pi's identity.
 
+On a freshly imaged Pi, first install the hostname unit from `pi/`, which names the box
+`hapi-<last 6 hex of the eth0 MAC>` at every boot (a no-op once set; reachable as `<name>.local`):
+
+```bash
+install -m 755 hapi-hostname.sh /usr/local/sbin/
+install -m 644 hapi-hostname.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now hapi-hostname
+```
+
+The box name identifies the hardware; the VPN client name is the site (e.g. site X uses hapi-1a2b3c).
+
 On the Pi (Raspberry Pi OS Lite 64-bit, Bookworm or Trixie, both OpenVPN 2.6), as root.
 `eth0` below is the Pi's LAN interface; use `wlan0` if it is on Wi-Fi (wired is preferred on site):
 

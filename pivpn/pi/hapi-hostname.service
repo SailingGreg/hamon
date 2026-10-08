@@ -1,0 +1,13 @@
+[Unit]
+Description=Set hostname to hapi-<eth0 MAC suffix>
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target avahi-daemon.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hapi-hostname.sh
+
+[Install]
+WantedBy=sysinit.target
