@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# pivpn-init <ca-name> <public-host>   (run as the data owner, see setup.sh)
+# Creates the PKI (EC P-256), server cert, CRL and tls-crypt-v2 server key in
+# /etc/pivpn and copies the default server.conf.  Keeps anything that exists.
+set -euo pipefail
+CA_NAME=$1 PUBLIC_HOST=$2
+cd /etc/pivpn
+export EASYRSA_PKI=/etc/pivpn/pki EASYRSA_BATCH=1 \
+       EASYRSA_ALGO=ec EASYRSA_CURVE=prime256v1 EASYRSA_DIGEST=sha256 \
+       EASYRSA_CRL_DAYS=3650
+EASYRSA=/usr/share/easy-rsa/easyrsa
+if [ ! -f pki/ca.crt ]; then
+  "$EASYRSA" init-pki
+  EASYRSA_REQ_CN="$CA_NAME" "$EASYRSA" build-ca nopass
+  "$EASYRSA" build-server-full server nopass
+  "$EASYRSA" gen-crl
+fi
+[ -f tc2-server.key ] || openvpn --genkey tls-crypt-v2-server tc2-server.key
+[ -f server.conf ] || cp /usr/local/share/pivpn/server.conf server.conf
+echo "$PUBLIC_HOST" > public-host
+mkdir -p ccd clients
+chmod 0700 pki clients
+echo "pivpn-init: CA $(openssl x509 -in pki/ca.crt -noout -subject | sed 's/.*CN *= *//'), public host $PUBLIC_HOST"
