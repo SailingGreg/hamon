@@ -25,10 +25,15 @@
 #   CERTS      a Let's Encrypt cert (file, or as served on CERT_PORTS) expires
 #              within CERT_WARN_DAYS, or its served chain doesn't verify   -> check
 #              certbot renewal (renews at 30d left, so <21d = failing ~a week)
+#   PIS        a site Pi (Pi-VPN client) is unreachable or its hapi-agent  -> check
+#              reports a problem, hapi-collect has stopped publishing,        the Pi
+#              or a Pi-VPN cert (CA, server, client) expires within
+#              PIVPN_WARN_DAYS (they don't auto-renew - see pivpn/README.md)
 #
 # Usage:  ./liveness-audit.sh           # print + log the report
 # Env overrides: ACTIVE_MIN, DROP_HOURS, LOOKBACK, ORG, BUCKET, SLACK_WEBHOOK,
-#                CERT_WARN_DAYS, CERT_PORTS, LE_LIVE
+#                CERT_WARN_DAYS, CERT_PORTS, LE_LIVE, PI_STALE_MIN, PI_OFFLINE_OK,
+#                PIVPN_PKI, PIVPN_WARN_DAYS
 
 set -uo pipefail
 
@@ -47,6 +52,10 @@ CERT_WARN_DAYS="${CERT_WARN_DAYS:-21}"  # certbot renews at 30d; below this it's
 CERT_PORTS="${CERT_PORTS:-443 3000 8080}" # local TLS endpoints (nginx, grafana, upload);
                                           # ports not listening / not TLS are skipped
 LE_LIVE="${LE_LIVE:-/etc/letsencrypt/live}"
+PI_STALE_MIN="${PI_STALE_MIN:-30}"      # hapi/+/status older than this = collector stopped
+PI_OFFLINE_OK="${PI_OFFLINE_OK:-^bench}" # Pi names allowed to be offline (bench/test)
+PIVPN_PKI="${PIVPN_PKI:-/home/greg/pivpn/pki}"
+PIVPN_WARN_DAYS="${PIVPN_WARN_DAYS:-60}" # manual renewal (easyrsa renew) - warn early
 
 # token optional (prod has one; staging queries unauthenticated) - see detector
 # shellcheck source=/dev/null
@@ -132,12 +141,57 @@ for f in "$LE_LIVE"/*/cert.pem; do
   done
 done
 
+# ---- site Pis: hapi-collect's retained hapi/<name>/status, plus Pi-VPN certs ----
+# name<TAB>reachable<TAB>ok<TAB>age_min<TAB>vpn_ip<TAB>error   (one line per Pi)
+pi_status() {
+  command -v mosquitto_sub >/dev/null || return 0
+  timeout 10 mosquitto_sub -h 127.0.0.1 -t 'hapi/+/status' -W 3 2>/dev/null \
+  | python3 -c '
+import json, sys, time
+from datetime import datetime
+for line in sys.stdin:
+    try:
+        m = json.loads(line)
+        t = datetime.strptime(m["collected"], "%Y-%m-%dT%H:%M:%S%z").timestamp()
+    except (ValueError, KeyError):
+        continue
+    err = (m.get("error") or "").replace("\t", " ").replace("\n", " ")
+    print("\t".join([m.get("site", "?"), str(int(bool(m.get("reachable")))),
+                     str(int(bool(m.get("ok")))), str(int((time.time() - t) // 60)),
+                     m.get("vpn_ip") or "", err]))
+'
+}
+n_pi=0 n_pi_ok=0; pi_bad=()
+while IFS=$'\t' read -r name reach ok age ip err; do
+  [ -n "$name" ] || continue
+  n_pi=$((n_pi+1))
+  if [ "$age" -gt "$PI_STALE_MIN" ]; then
+    pi_bad+=("$name ($ip) status ${age}m old - is hapi-collect.timer running?")
+  elif [ "$reach" = 0 ] && [[ "$name" =~ $PI_OFFLINE_OK ]]; then
+    n_pi_ok=$((n_pi_ok+1))                 # bench/test Pi, offline is normal
+  elif [ "$ok" = 1 ]; then
+    n_pi_ok=$((n_pi_ok+1))
+  else
+    pi_bad+=("$name ($ip) ${err:-not ok}")
+  fi
+done < <(pi_status)
+if [ -d "$PIVPN_PKI" ]; then
+  for f in "$PIVPN_PKI/ca.crt" "$PIVPN_PKI"/issued/*.crt; do
+    [ -r "$f" ] || continue
+    end=$(openssl x509 -in "$f" -noout -enddate 2>/dev/null | cut -d= -f2)
+    [ -n "$end" ] || continue
+    d=$(cert_days "$end")
+    [ "$d" -lt "$PIVPN_WARN_DAYS" ] && pi_bad+=("Pi-VPN cert $(basename "$f" .crt) expires in ${d}d ($end)")
+  done
+fi
+
 # ---- report ----
 emit "$(date '+%F %T') liveness audit  (active<${ACTIVE_MIN}m, drop>${DROP_HOURS}h, lookback ${LOOKBACK})"
 emit "  enabled=$n_en  active=$n_active  hung=$n_hung  dropped=${#dropped[@]}  never=${#never[@]}  disabled-but-flowing=${#odd[@]}  malformed=${#malformed[@]}"
 if [ "${#cert_summary[@]}" -gt 0 ]; then
   emit "  certs (days left): $(printf '%s, ' "${cert_summary[@]}" | sed 's/, $//')"
 fi
+[ "$n_pi" -gt 0 ] && emit "  site Pis: $n_pi_ok/$n_pi ok"
 
 if [ "${#dropped[@]}" -gt 0 ]; then
   emit "  DROPPED (enabled, was flowing, now silent >${DROP_HOURS}h - investigate):"
@@ -159,10 +213,14 @@ if [ "${#cert_bad[@]}" -gt 0 ]; then
   emit "  CERTS (renewal failing or bad chain - check certbot / restart the server holding it):"
   for r in "${cert_bad[@]}"; do emit "    - $r"; done
 fi
+if [ "${#pi_bad[@]}" -gt 0 ]; then
+  emit "  PIS (site Pi or Pi-VPN problems - ssh pivpn@<vpn ip> from here; pivpn/README.md):"
+  for r in "${pi_bad[@]}"; do emit "    - $r"; done
+fi
 
 # Slack: one compact line, only when there is something to act on
-if [ -n "$SLACK_WEBHOOK" ] && { [ "${#dropped[@]}" -gt 0 ] || [ "${#never[@]}" -gt 0 ] || [ "${#odd[@]}" -gt 0 ] || [ "${#malformed[@]}" -gt 0 ] || [ "${#cert_bad[@]}" -gt 0 ]; }; then
-  msg="hamon liveness: ${#dropped[@]} dropped, ${#never[@]} never, ${#odd[@]} disabled-but-flowing, ${#malformed[@]} malformed, ${#cert_bad[@]} cert problems (enabled=$n_en active=$n_active)"
+if [ -n "$SLACK_WEBHOOK" ] && { [ "${#dropped[@]}" -gt 0 ] || [ "${#never[@]}" -gt 0 ] || [ "${#odd[@]}" -gt 0 ] || [ "${#malformed[@]}" -gt 0 ] || [ "${#cert_bad[@]}" -gt 0 ] || [ "${#pi_bad[@]}" -gt 0 ]; }; then
+  msg="hamon liveness: ${#dropped[@]} dropped, ${#never[@]} never, ${#odd[@]} disabled-but-flowing, ${#malformed[@]} malformed, ${#cert_bad[@]} cert problems, ${#pi_bad[@]} Pi problems (enabled=$n_en active=$n_active)"
   curl -sf -X POST -H 'Content-type: application/json' --data "{\"text\":\"$msg\"}" "$SLACK_WEBHOOK" >/dev/null 2>&1 || true
 fi
 exit 0
