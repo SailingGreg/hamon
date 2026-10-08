@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 #
-# hapi-agent  -  KNX gateway discovery, forwarding and self-test for a site Pi.
+# hapi-agent.py  -  KNX gateway discovery, forwarding and self-test for a site Pi.
+# Installed on the Pi as /usr/local/sbin/hapi-agent (the command used below).
 #
 # The Pi forwards <tunnel IP>:3671 to the site's KNX/IP gateway so hamon can
 # reach it over the VPN.  This finds the gateway itself (KNXnet/IP search on

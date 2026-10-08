@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 #
-# hapi-collect  -  gather site-Pi status over the VPN and publish it on MQTT.
+# hapi-collect.py  -  gather site-Pi status over the VPN and publish it on MQTT.
 #
 # Every Pi-VPN client has a ccd file (~/pivpn/ccd/<name>) with its fixed tunnel
 # IP.  For each one this fetches the Pi's /run/hapi/status.json (written by
@@ -14,7 +14,7 @@
 # MQTT credentials on the Pis.  Needs this user's ssh key on each Pi
 # (pivpn@10.8.0.N).  Run by hapi-collect.timer; prints one line per Pi.
 #
-#   hapi-collect [-n]          # -n: print the messages, don't publish
+#   hapi-collect.py [-n]       # -n: print the messages, don't publish
 
 import glob
 import json

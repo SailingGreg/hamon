@@ -8,5 +8,5 @@ Type=oneshot
 User=greg
 Group=greg
 WorkingDirectory=/home/greg/hamon
-ExecStart=/home/greg/hamon/pivpn/hapi-collect
+ExecStart=/home/greg/hamon/pivpn/hapi-collect.py
 Nice=5

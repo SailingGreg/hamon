@@ -65,7 +65,7 @@ saved), and every 10 minutes follows the gateway if its IP changes:
 
 ```bash
 apt install -y conntrack
-install -m 755 hapi-agent /usr/local/sbin/
+install -m 755 hapi-agent.py /usr/local/sbin/hapi-agent
 install -m 644 hapi-agent.service hapi-agent.timer /etc/systemd/system/
 install -d /etc/hapi && install -m 600 hapi-agent.conf.example /etc/hapi/agent.conf
 systemctl daemon-reload
@@ -78,7 +78,7 @@ hapi-agent status            # last result: VPN, gateway, forward, errors
 With several tunnelling gateways it refuses to guess: set `gateway_serial` in
 `/etc/hapi/agent.conf`. If multicast is blocked, set `gateway_ip`. If the gateway vanishes
 it keeps the last forward and reports the problem. The timer run never takes a tunnel slot
-(it only sends a description request). `hapi-agent test 10.8.0.N` run on the server tests
+(it only sends a description request). `pi/hapi-agent.py test 10.8.0.N` run on the server tests
 the whole path the way hamon connects (NAT mode). `fake-gateway.py` stands in for a gateway
 on the bench.
 
