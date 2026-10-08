@@ -6,3 +6,5 @@ yarn-error.log
 # docs/ kept out of the repo: operational notes reference site/customer
 # identifiers (hostnames, IPs, site names) and must not be published.
 docs/
+# freshness-detector per-site thresholds: names sites, stays local
+freshness-thresholds.conf

@@ -20,11 +20,16 @@
 #     `oldmarketrd`; `OPUS_AQUA` -> container `opusaqua`).  The hamon.yml `dns:`
 #     IP is the only reliable join.  Lowercase+strip-non-alnum name matching is
 #     a fallback for when no container holds the IP.
+#   * Per-site thresholds live in a site-local override file (THRESH_FILE), not
+#     hamon.yml: hamon.yml is written by hamon-upload, which owns its format, and
+#     the file names sites so it stays out of git.  Use it for low-traffic sites
+#     whose normal quiet spells exceed THRESH_MIN.  One `<location> <minutes>`
+#     per line, `#` comments allowed; location is case-exact (as in Influx).
 #
 # Usage:
 #   DRYRUN=1 ./freshness-detector.sh     # report only (DEFAULT) - nothing restarted
 #   DRYRUN=0 ./freshness-detector.sh     # act: restart stale sites
-# Env overrides: THRESH_MIN, WINDOW, ORG, BUCKET, SLACK_WEBHOOK
+# Env overrides: THRESH_MIN, THRESH_FILE, WINDOW, ORG, BUCKET, SLACK_WEBHOOK
 
 set -uo pipefail
 
@@ -38,6 +43,7 @@ ENVFILE="${ENVFILE:-$HAMON/.hamon-backup.env}"   # provides INFLUX_TOKEN
 ORG="${ORG:-HA}"
 BUCKET="${BUCKET:-hamon}"
 THRESH_MIN="${THRESH_MIN:-20}"          # stale if last point older than this (minutes)
+THRESH_FILE="${THRESH_FILE:-$HAMON/freshness-thresholds.conf}"  # per-site overrides
 WINDOW="${WINDOW:-24h}"                  # freshness query lookback (>> THRESH_MIN);
                                          # must exceed worst tolerated outage or a
                                          # hard-down site ages out of the report
@@ -85,6 +91,16 @@ from(bucket:\"$BUCKET\")
    | awk -F, 'NR>3 && $5!="" && $5!="location"{print $5","$4}'
 }
 
+# ---- per-site thresholds ----------------------------------------------------
+declare -A SITE_THRESH=()
+if [ -f "$THRESH_FILE" ]; then
+  while read -r site mins _; do
+    [[ -z "$site" || "$site" == \#* ]] && continue
+    if [[ "$mins" =~ ^[0-9]+$ ]]; then SITE_THRESH["$site"]="$mins"
+    else log "WARN  $THRESH_FILE: ignoring bad threshold for '$site': '$mins'"; fi
+  done < "$THRESH_FILE"
+fi
+
 # ---- hamon.yml helpers (case-exact: Influx tag == yml name) ------------------
 yml_field() {  # yml_field <site> <field>   (dns | enabled | config)
   grep -A 9 " name: $1" "$YML" 2>/dev/null | grep -m1 " $2:" | awk '{print $2}'
@@ -110,14 +126,15 @@ container_for() {  # container_for <ip> <site>
 # ---- main -------------------------------------------------------------------
 now=$(date -u +%s)
 mode_tag=$([ "$DRYRUN" = 0 ] && echo "ACT" || echo "DRYRUN")
-log "freshness scan start ($mode_tag) threshold=${THRESH_MIN}m window=-${WINDOW}"
+log "freshness scan start ($mode_tag) threshold=${THRESH_MIN}m overrides=${#SITE_THRESH[@]} window=-${WINDOW}"
 
 stale=0
 while IFS=, read -r loc ts; do
   [ -n "$loc" ] || continue
   last=$(date -u -d "$ts" +%s 2>/dev/null) || continue
   age=$(( (now - last) / 60 ))
-  [ "$age" -lt "$THRESH_MIN" ] && continue
+  thresh="${SITE_THRESH[$loc]:-$THRESH_MIN}"
+  [ "$age" -lt "$thresh" ] && continue
 
   stale=$((stale + 1))
   enabled=$(yml_field "$loc" enabled)
@@ -139,7 +156,7 @@ while IFS=, read -r loc ts; do
       slack "HAMON/$loc hung ${age}m: docker restart $cont"
     fi
   else
-    log "STALE $loc ${age}m standard -> kpipe re-init"
+    log "STALE $loc ${age}m (>=${thresh}m) standard -> kpipe re-init"
     if [ "$DRYRUN" = 0 ]; then echo "$loc" > "$KPIPE"; fi
     slack "HAMON/$loc hung ${age}m: kpipe re-init"
   fi
