@@ -87,6 +87,18 @@ def status():
         return {}
 
 
+def fresh_status(max_age=60):
+    """Search again first if the last result is older than max_age seconds,
+    so opening or reloading the page always shows what is there now."""
+    try:
+        age = time.time() - os.stat(STATUS_FILE).st_mtime
+    except OSError:
+        age = max_age + 1
+    if age > max_age:
+        with LOCK:
+            agent("run")
+
+
 # ---------------------------------------------------------------- page
 
 CSS = """
@@ -116,6 +128,8 @@ cursor:pointer}button.sec{background:transparent;color:var(--ok)}
 .row{display:flex;flex-wrap:wrap;gap:10px}form{margin:0}
 .flash{border-left:4px solid var(--ok);background:var(--okbg)}
 pre{white-space:pre-wrap;margin:8px 0 0;font-size:.85rem}
+button[disabled]{opacity:.5;cursor:progress}
+.busy{border-left:4px solid var(--muted)}
 """
 
 
@@ -141,6 +155,9 @@ def render():
     parts = ['<main><header><h1>%s setup</h1><p class="muted">KNX gateway '
              'link for hamon monitoring.</p></header>'
              % esc(socket.gethostname())]
+    parts.append('<div class="card busy" id="busy" hidden><b>Working...</b> '
+                 'searching the network and applying the change takes a few '
+                 'seconds.</div>')
     if FLASH["msg"]:
         parts.append('<div class="card flash"><b>%s</b>%s</div>' % (
             esc(FLASH["msg"]), "<pre>%s</pre>" % esc(FLASH["detail"])
@@ -202,7 +219,14 @@ def render():
                      " A gateway is chosen by hand (%s); "
                      "\"Choose automatically\" undoes that." % esc(pinned)
                      if pinned else ""))
-    parts.append("</main>")
+    parts.append("</main><script>(function(){var busy=false;"
+                 "document.querySelectorAll('form').forEach(function(f){"
+                 "f.addEventListener('submit',function(e){if(busy){"
+                 "e.preventDefault();return;}busy=true;"
+                 "document.getElementById('busy').hidden=false;"
+                 "setTimeout(function(){document.querySelectorAll('button')"
+                 ".forEach(function(b){b.disabled=true;});},0);});});"
+                 "})();</script>")
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,"
             "initial-scale=1\"><title>%s setup</title><style>%s</style>"
@@ -263,9 +287,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.allowed():
             return
+        if self.path in ("/refresh", "/select", "/test"):
+            # an action address opened directly (reload, back, typed): show
+            # the page instead of an error
+            self.send(303, "", "text/plain", {"Location": "/"})
+            return
         if self.path not in ("/", "/index.html"):
             self.send(404, "Not found\n", "text/plain")
             return
+        fresh_status()
         self.send(200, render())
 
     def do_POST(self):
