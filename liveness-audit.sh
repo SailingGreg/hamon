@@ -22,8 +22,13 @@
 #   MALFORMED  enabled: is neither true nor false (e.g. a typo like  -> fix the yml;
 #              `flase`) so consumers disagree on whether it is live     intent unknown
 #
+#   CERTS      a Let's Encrypt cert (file, or as served on CERT_PORTS) expires
+#              within CERT_WARN_DAYS, or its served chain doesn't verify   -> check
+#              certbot renewal (renews at 30d left, so <21d = failing ~a week)
+#
 # Usage:  ./liveness-audit.sh           # print + log the report
-# Env overrides: ACTIVE_MIN, DROP_HOURS, LOOKBACK, ORG, BUCKET, SLACK_WEBHOOK
+# Env overrides: ACTIVE_MIN, DROP_HOURS, LOOKBACK, ORG, BUCKET, SLACK_WEBHOOK,
+#                CERT_WARN_DAYS, CERT_PORTS, LE_LIVE
 
 set -uo pipefail
 
@@ -38,6 +43,10 @@ ACTIVE_MIN="${ACTIVE_MIN:-20}"        # flowing if last point younger than this 
 DROP_HOURS="${DROP_HOURS:-6}"          # enabled+silent beyond this = DROPPED
 LOOKBACK="${LOOKBACK:-180d}"           # "ever seen" window; older than this = NEVER
 SLACK_WEBHOOK="${SLACK_WEBHOOK:-}"
+CERT_WARN_DAYS="${CERT_WARN_DAYS:-21}"  # certbot renews at 30d; below this it's failing
+CERT_PORTS="${CERT_PORTS:-443 3000 8080}" # local TLS endpoints (nginx, grafana, upload);
+                                          # ports not listening / not TLS are skipped
+LE_LIVE="${LE_LIVE:-/etc/letsencrypt/live}"
 
 # token optional (prod has one; staging queries unauthenticated) - see detector
 # shellcheck source=/dev/null
@@ -97,9 +106,38 @@ while IFS=$'\t' read -r name en dns desc; do
   fi
 done < <(roster)
 
+# ---- certificates: on disk, and as actually served ----
+# Names come from the certs themselves (no hostnames in this repo).  A served
+# check catches a daemon still holding an old cert after renewal, and an
+# incomplete chain (leaf without intermediate) that only some clients reject.
+cert_days() { echo $(( ( $(date -u -d "$1" +%s) - now ) / 86400 )); }
+cert_summary=(); cert_bad=()
+declare -A cert_seen=()
+for f in "$LE_LIVE"/*/cert.pem; do
+  [ -r "$f" ] || continue
+  real=$(readlink -f "$f"); [ -n "${cert_seen[$real]:-}" ] && continue; cert_seen[$real]=1
+  cn=$(openssl x509 -in "$f" -noout -subject 2>/dev/null | sed -n 's/.*CN *= *//p')
+  end=$(openssl x509 -in "$f" -noout -enddate 2>/dev/null | cut -d= -f2)
+  [ -n "$end" ] || { cert_bad+=("$cn file unreadable: $f"); continue; }
+  d=$(cert_days "$end"); cert_summary+=("file ${d}d")
+  [ "$d" -lt "$CERT_WARN_DAYS" ] && cert_bad+=("$cn file expires in ${d}d ($end)")
+  for port in $CERT_PORTS; do
+    out=$(timeout 5 openssl s_client -connect "127.0.0.1:$port" -servername "$cn" </dev/null 2>/dev/null) || true
+    end=$(printf '%s\n' "$out" | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+    [ -n "$end" ] || continue
+    d=$(cert_days "$end"); cert_summary+=(":$port ${d}d")
+    [ "$d" -lt "$CERT_WARN_DAYS" ] && cert_bad+=("$cn served on :$port expires in ${d}d ($end)")
+    vrc=$(printf '%s\n' "$out" | sed -n 's/.*Verify return code: \([0-9]*\).*/\1/p' | tail -1)
+    [ "${vrc:-x}" = 0 ] || cert_bad+=("$cn served on :$port chain does not verify (code ${vrc:-?})")
+  done
+done
+
 # ---- report ----
 emit "$(date '+%F %T') liveness audit  (active<${ACTIVE_MIN}m, drop>${DROP_HOURS}h, lookback ${LOOKBACK})"
 emit "  enabled=$n_en  active=$n_active  hung=$n_hung  dropped=${#dropped[@]}  never=${#never[@]}  disabled-but-flowing=${#odd[@]}  malformed=${#malformed[@]}"
+if [ "${#cert_summary[@]}" -gt 0 ]; then
+  emit "  certs (days left): $(printf '%s, ' "${cert_summary[@]}" | sed 's/, $//')"
+fi
 
 if [ "${#dropped[@]}" -gt 0 ]; then
   emit "  DROPPED (enabled, was flowing, now silent >${DROP_HOURS}h - investigate):"
@@ -117,10 +155,14 @@ if [ "${#malformed[@]}" -gt 0 ]; then
   emit "  MALFORMED (enabled: not true/false - fix the yml):"
   for r in "${malformed[@]}"; do IFS='|' read -r n dns ds <<<"$r"; emit "    - $n  dns=${dns}  (${ds})"; done
 fi
+if [ "${#cert_bad[@]}" -gt 0 ]; then
+  emit "  CERTS (renewal failing or bad chain - check certbot / restart the server holding it):"
+  for r in "${cert_bad[@]}"; do emit "    - $r"; done
+fi
 
 # Slack: one compact line, only when there is something to act on
-if [ -n "$SLACK_WEBHOOK" ] && { [ "${#dropped[@]}" -gt 0 ] || [ "${#never[@]}" -gt 0 ] || [ "${#odd[@]}" -gt 0 ] || [ "${#malformed[@]}" -gt 0 ]; }; then
-  msg="hamon liveness: ${#dropped[@]} dropped, ${#never[@]} never, ${#odd[@]} disabled-but-flowing, ${#malformed[@]} malformed (enabled=$n_en active=$n_active)"
+if [ -n "$SLACK_WEBHOOK" ] && { [ "${#dropped[@]}" -gt 0 ] || [ "${#never[@]}" -gt 0 ] || [ "${#odd[@]}" -gt 0 ] || [ "${#malformed[@]}" -gt 0 ] || [ "${#cert_bad[@]}" -gt 0 ]; }; then
+  msg="hamon liveness: ${#dropped[@]} dropped, ${#never[@]} never, ${#odd[@]} disabled-but-flowing, ${#malformed[@]} malformed, ${#cert_bad[@]} cert problems (enabled=$n_en active=$n_active)"
   curl -sf -X POST -H 'Content-type: application/json' --data "{\"text\":\"$msg\"}" "$SLACK_WEBHOOK" >/dev/null 2>&1 || true
 fi
 exit 0
