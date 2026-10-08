@@ -12,3 +12,4 @@ freshness-thresholds.conf
 .freshness.env
 # per-site VPN launchers/configs on the servers (site names, PSKs) - never commit
 vpn/
+__pycache__/
