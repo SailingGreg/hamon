@@ -42,6 +42,19 @@ systemctl daemon-reload && systemctl enable --now hapi-hostname
 
 The box name identifies the hardware; the VPN client name is the site (e.g. site X uses hapi-1a2b3c).
 
+To find a box on the bench (its IP, MAC and `hapi-` name, before or after the hostname unit is
+installed), run `./hapi-find.sh` on a machine on the same network, e.g. the dev Pi:
+
+```
+IP               MAC                EXPECTED NAME MDNS      SSH  SETUP PAGE
+192.168.1.40     b8:27:eb:1a:2b:3c  hapi-1a2b3c   yes       yes  http://hapi-1a2b3c.local/
+192.168.1.41     d8:3a:dd:4d:5e:6f  hapi-4d5e6f   not yet   yes  no
+```
+
+`not yet` under MDNS means the box doesn't answer to that name yet (a fresh image is still
+`raspberrypi`), or it's on Wi-Fi, where the MAC seen is wlan0's. It needs nmap, curl and
+libnss-mdns, works only on a directly attached network, and takes about 15 s for a /24.
+
 On the Pi (Raspberry Pi OS Lite 64-bit, Bookworm or Trixie, both OpenVPN 2.6), as root.
 `eth0` below is the Pi's LAN interface; use `wlan0` if it is on Wi-Fi (wired is preferred on site):
 
