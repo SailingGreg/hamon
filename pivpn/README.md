@@ -135,6 +135,42 @@ Install once: `install -m 644 hapi-collect.service hapi-collect.timer /etc/syste
 then `systemctl daemon-reload && systemctl enable --now hapi-collect.timer`. A new Pi needs
 prod's ssh key in its `~pivpn/.ssh/authorized_keys`.
 
+### Checking a site Pi's KNX forward
+
+On the Pi (`ssh pivpn@10.86.0.N` from the server). First see what the agent thinks:
+
+```bash
+hapi-agent status        # "gateway": chosen gateway + selected_by; "forward": tun0:3671 -> GW:3671
+ip -4 -o addr            # eth0 = site LAN address, tun0 = 10.86.0.N/16
+```
+
+Then check the kernel actually has the forward. `iptables` needs the Pi's sudo password
+(from the device register): the passwordless rule covers only `hapi-agent`.
+
+```bash
+sudo iptables -t nat -S HAPI-DNAT     # the forward itself
+# -N HAPI-DNAT
+# -A HAPI-DNAT -i tun0 -p udp -m udp --dport 3671 -j DNAT --to-destination 192.168.1.98:3671
+sudo iptables -t nat -S HAPI-SNAT     # replies come back to the Pi
+# -A HAPI-SNAT -d 192.168.1.98/32 -o eth0 -p udp -m udp --dport 3671 -j MASQUERADE
+sudo iptables -t nat -L HAPI-DNAT -nv # pkts column: new flows forwarded (hamon connects)
+sudo conntrack -L -p udp --dport 3671 # live flow: src 10.86.0.1 -> 10.86.0.N, reply from GW
+```
+
+Reading it:
+
+| What you see | Meaning | Next |
+|---|---|---|
+| `No chain/target/match by that name` | No gateway has ever been confirmed, so the agent hasn't created its chains (normal on the bench) | `hapi-agent discover`; pin a serial or set `gateway_ip` |
+| `-A` line, but its IP isn't the site gateway | Forwarding to the wrong device or an old address | `hapi-agent status` → `gateways`; `sudo hapi-agent pin <serial>` |
+| Right IP, `pkts` stays 0 | Nothing from hamon is arriving | hamon's `dns` for the site must be `10.86.0.N`; tunnel up? |
+| Right IP, `pkts` rising, no conntrack reply | Forwarded but the gateway doesn't answer | gateway power/LAN, tunnel slots in use (ETS, apps) |
+| Right IP, conntrack shows replies | Path is working end to end | — |
+
+From the server, `pi/hapi-agent.py test 10.86.0.N` runs a full KNX tunnel
+connect/state/disconnect through this forward, exactly as hamon connects (it briefly takes
+one of the gateway's tunnel slots).
+
 ## Remove / revoke a site
 
 ```bash
