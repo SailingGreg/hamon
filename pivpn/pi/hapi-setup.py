@@ -12,9 +12,12 @@
 #
 # Kept small on purpose:
 #   - answers only clients on the Pi's own LAN subnets (never the VPN side);
-#   - needs the setup code printed on the box's label (as KNX Secure devices
-#     carry their key), HTTP basic auth as user admin, and a one-minute
-#     lock-out after five wrong codes;
+#   - sign-in form: user admin + the setup code printed on the box's label (as
+#     KNX Secure devices carry their key), one-minute lock-out after five
+#     wrong codes;
+#   - the session is a random cookie held in memory here: it ends after 30 min
+#     idle, 4 hours at most, on "Sign out", when the setup code changes, or
+#     when the page restarts;
 #   - runs unprivileged; the only root action is `sudo hapi-agent ...`.
 #
 # Config: [setup] in /etc/hapi/agent.conf (port, code_file).
@@ -27,6 +30,7 @@ import html
 import ipaddress
 import json
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -47,8 +51,12 @@ except OSError:
     pass
 SETUP = cp["setup"]
 FAILS = {"n": 0, "until": 0.0}
+SESSIONS = {}                     # token -> {issued, last, csrf, code}
+IDLE_SECS, MAX_SECS = 30 * 60, 4 * 3600
+COOKIE = "hapi_session"
 FLASH = {"msg": "", "detail": ""}
-LOCK = threading.Lock()
+LOCK = threading.Lock()          # one hapi-agent action at a time
+SESS_LOCK = threading.Lock()     # sessions; never held across hapi-agent
 
 
 def setup_code():
@@ -56,12 +64,33 @@ def setup_code():
         return f.read().strip()
 
 
-def csrf_token():
-    """Form token: derived from the setup code, so it survives a restart
-    of the page (no 'page expired' after a reboot) but can't be forged
-    without the code."""
-    return hmac.new(setup_code().encode(), b"hapi-setup form",
-                    "sha256").hexdigest()[:32]
+def code_tag():
+    """Short fingerprint of the setup code: changing the code ends sessions."""
+    return hmac.new(setup_code().encode(), b"hapi-setup session",
+                    "sha256").hexdigest()[:16]
+
+
+def new_session():
+    now = time.time()
+    token = secrets.token_urlsafe(32)
+    SESSIONS[token] = {"issued": now, "last": now, "code": code_tag(),
+                       "csrf": secrets.token_urlsafe(24)}
+    return token
+
+
+def live_session(token):
+    """The session for this token if still valid (renewing its idle timer)."""
+    now = time.time()
+    for t in [t for t, v in SESSIONS.items()
+              if now - v["last"] > IDLE_SECS or now - v["issued"] > MAX_SECS]:
+        del SESSIONS[t]
+    sess = SESSIONS.get(token or "")
+    if sess and not hmac.compare_digest(sess["code"], code_tag()):
+        del SESSIONS[token]
+        sess = None
+    if sess:
+        sess["last"] = now
+    return sess
 
 
 def lan_networks():
@@ -93,16 +122,30 @@ def status():
         return {}
 
 
+SEARCH = {"running": False}
+
+
 def fresh_status(max_age=60):
-    """Search again first if the last result is older than max_age seconds,
-    so opening or reloading the page always shows what is there now."""
+    """If the last result is older than max_age seconds, start a search in
+    the background and return True; the page shows the last result straight
+    away and reloads itself when the search has finished."""
     try:
         age = time.time() - os.stat(STATUS_FILE).st_mtime
     except OSError:
         age = max_age + 1
-    if age > max_age:
-        with LOCK:
-            agent("run")
+    if age <= max_age:
+        return SEARCH["running"]
+    if not SEARCH["running"]:
+        SEARCH["running"] = True
+
+        def search():
+            try:
+                with LOCK:
+                    agent("run")
+            finally:
+                SEARCH["running"] = False
+        threading.Thread(target=search, daemon=True).start()
+    return True
 
 
 # ---------------------------------------------------------------- page
@@ -136,6 +179,14 @@ cursor:pointer}button.sec{background:transparent;color:var(--ok)}
 pre{white-space:pre-wrap;margin:8px 0 0;font-size:.85rem}
 button[disabled]{opacity:.5;cursor:progress}
 .busy{border-left:4px solid var(--muted)}
+.warn{border-left:4px solid var(--bad);background:var(--badbg)}
+.top{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;
+align-items:flex-start}
+.login{display:grid;gap:8px;max-width:24rem}.login h2{margin:0}
+.login label{color:var(--muted);font-size:.9rem}
+input{font:inherit;padding:6px 8px;border:1px solid var(--line);
+border-radius:6px;background:var(--bg);color:var(--fg)}
+:focus-visible{outline:2px solid var(--ok);outline-offset:2px}
 """
 
 
@@ -143,27 +194,57 @@ def esc(x):
     return html.escape("" if x is None else str(x))
 
 
-def button(action, label, extra="", cls=""):
+def button(action, label, extra="", cls="", csrf=""):
     hidden = "".join('<input type="hidden" name="%s" value="%s">'
                      % (esc(k), esc(v)) for k, v in extra.items()) \
         if extra else ""
     return ('<form method="post" action="%s"><input type="hidden" '
             'name="csrf" value="%s">%s<button%s>%s</button></form>'
-            % (action, csrf_token(), hidden, ' class="%s"' % cls if cls else "",
+            % (action, esc(csrf), hidden, ' class="%s"' % cls if cls else "",
                esc(label)))
 
 
-def render():
+def page(title, body):
+    return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width,"
+            "initial-scale=1\"><title>%s</title><style>%s</style>"
+            "</head><body>%s</body></html>" % (esc(title), CSS, body))
+
+
+def render_login(msg=""):
+    host = esc(socket.gethostname())
+    return page("%s setup" % host,
+                '<main><header><h1>%s setup</h1><p class="muted">KNX gateway '
+                'link for hamon monitoring.</p></header>%s'
+                '<form class="card login" method="post" action="/login">'
+                '<h2>Sign in</h2>'
+                '<label for="user">User</label>'
+                '<input id="user" name="user" value="admin" autocomplete="username">'
+                '<label for="code">Setup code (on the box\'s label)</label>'
+                '<input id="code" name="code" type="password" required autofocus '
+                'autocomplete="current-password">'
+                '<button>Sign in</button></form></main>'
+                % (host, '<div class="card warn"><b>%s</b></div>' % esc(msg)
+                   if msg else ""))
+
+
+def render(csrf, searching=False):
     st = status()
     gw = st.get("gateway") or {}
     in_use = gw.get("serial") if gw.get("answers") else None
     vpn = st.get("vpn") or {}
-    parts = ['<main><header><h1>%s setup</h1><p class="muted">KNX gateway '
-             'link for hamon monitoring.</p></header>'
-             % esc(socket.gethostname())]
+    parts = ['<main><header class="top"><div><h1>%s setup</h1>'
+             '<p class="muted">KNX gateway link for hamon monitoring.</p></div>'
+             '%s</header>' % (esc(socket.gethostname()),
+                              button("/logout", "Sign out", cls="sec",
+                                     csrf=csrf))]
     parts.append('<div class="card busy" id="busy" hidden><b>Working...</b> '
                  'searching the network and applying the change takes a few '
                  'seconds.</div>')
+    if searching:
+        parts.append('<div class="card busy" id="searching"><b>Searching the '
+                     'network...</b> showing the last result until the new one '
+                     'is ready (a few seconds).</div>')
     if FLASH["msg"]:
         parts.append('<div class="card flash"><b>%s</b>%s</div>' % (
             esc(FLASH["msg"]), "<pre>%s</pre>" % esc(FLASH["detail"])
@@ -202,7 +283,7 @@ def render():
                 act = '<span class="pill ok">in use</span>'
             elif d.get("tunnelling"):
                 act = button("/select", "Use this one",
-                             {"serial": d.get("serial") or ""})
+                             {"serial": d.get("serial") or ""}, csrf=csrf)
             else:
                 act = '<span class="muted">not usable</span>'
             parts.append("<tr><td>%s</td><td>%s</td><td><code>%s</code></td>"
@@ -218,10 +299,10 @@ def render():
                  '%s%s</div><p class="muted">Search again after moving cables. '
                  'The connection test briefly uses one of the gateway\'s '
                  'connections.%s</p></section>' % (
-                     button("/refresh", "Search again"),
-                     button("/test", "Test connection", cls="sec"),
+                     button("/refresh", "Search again", csrf=csrf),
+                     button("/test", "Test connection", cls="sec", csrf=csrf),
                      button("/select", "Choose automatically", {"serial": ""},
-                            "sec") if pinned else "",
+                            "sec", csrf=csrf) if pinned else "",
                      " A gateway is chosen by hand (%s); "
                      "\"Choose automatically\" undoes that." % esc(pinned)
                      if pinned else ""))
@@ -232,12 +313,14 @@ def render():
                  "document.getElementById('busy').hidden=false;"
                  "setTimeout(function(){document.querySelectorAll('button')"
                  ".forEach(function(b){b.disabled=true;});},0);});});"
+                 "if(document.getElementById('searching')){var poll=function(){"
+                 "fetch('/searching',{cache:'no-store'}).then(function(r){"
+                 "return r.text();}).then(function(t){if(busy)return;"
+                 "if(t.trim()==='no')location.reload();"
+                 "else setTimeout(poll,1000);}).catch(function(){"
+                 "setTimeout(poll,3000);});};setTimeout(poll,1000);}"
                  "})();</script>")
-    return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-            "<meta name=\"viewport\" content=\"width=device-width,"
-            "initial-scale=1\"><title>%s setup</title><style>%s</style>"
-            "</head><body>%s</body></html>"
-            % (esc(socket.gethostname()), CSS, "".join(parts)))
+    return page("%s setup" % socket.gethostname(), "".join(parts))
 
 
 # ---------------------------------------------------------------- server
@@ -260,59 +343,99 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def allowed(self):
+    def on_lan(self):
         ip = ipaddress.ip_address(self.client_address[0])
         if not any(ip in n for n in lan_networks()):
             self.send(403, "Setup is only available on the local network.\n",
                       "text/plain")
             return False
-        if time.time() < FAILS["until"]:
-            self.send(429, "Too many wrong codes - wait a minute.\n",
-                      "text/plain")
-            return False
-        auth = self.headers.get("Authorization", "")
-        good = False
-        if auth.startswith("Basic "):
-            try:
-                user, given = base64.b64decode(auth[6:]).decode().split(":", 1)
-                good = hmac.compare_digest(given.strip(), setup_code()) \
-                    and user.strip().lower() == "admin"
-            except (ValueError, UnicodeDecodeError):
-                good = False
-        if not good:
-            if auth:
-                FAILS["n"] += 1
-                if FAILS["n"] >= 5:
-                    FAILS["n"], FAILS["until"] = 0, time.time() + 60
-            self.send(401, "Sign in as admin with the setup code from the "
-                      "box's label.\n", "text/plain",
-                      {"WWW-Authenticate": 'Basic realm="hapi setup"'})
-            return False
-        FAILS["n"] = 0
         return True
 
-    def do_GET(self):
-        if not self.allowed():
+    def cookie_token(self):
+        for part in self.headers.get("Cookie", "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == COOKIE:
+                return v
+        return None
+
+    def session_cookie(self, token, max_age):
+        return {"Set-Cookie": "%s=%s; Path=/; Max-Age=%d; HttpOnly; "
+                              "SameSite=Strict" % (COOKIE, token, max_age)}
+
+    def form(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        return parse_qs(self.rfile.read(min(n, 4096)).decode())
+
+    def login(self):
+        if time.time() < FAILS["until"]:
+            self.send(429, render_login("Too many wrong codes - wait a minute "
+                                        "and try again."))
             return
-        if self.path in ("/refresh", "/select", "/test"):
+        form = self.form()
+        user = form.get("user", [""])[0].strip().lower()
+        given = form.get("code", [""])[0].strip()
+        if user == "admin" and hmac.compare_digest(given, setup_code()):
+            FAILS["n"] = 0
+            with SESS_LOCK:
+                token = new_session()
+            self.send(303, "", "text/plain",
+                      {**self.session_cookie(token, MAX_SECS), "Location": "/"})
+            return
+        FAILS["n"] += 1
+        if FAILS["n"] >= 5:
+            FAILS["n"], FAILS["until"] = 0, time.time() + 60
+        self.send(401, render_login("Wrong user or setup code. The user is "
+                                    "admin; the code is on the box's label."))
+
+    def do_GET(self):
+        if not self.on_lan():
+            return
+        token = self.cookie_token()
+        with SESS_LOCK:
+            sess = live_session(token)
+        if not sess:
+            self.send(200, render_login("Your session has ended - sign in "
+                                        "again." if token else ""),
+                      hdrs=self.session_cookie("", 0) if token else None)
+            return
+        if self.path in ("/refresh", "/select", "/test", "/login", "/logout"):
             # an action address opened directly (reload, back, typed): show
             # the page instead of an error
             self.send(303, "", "text/plain", {"Location": "/"})
             return
+        if self.path == "/searching":       # polled while a search runs
+            self.send(200, "yes" if SEARCH["running"] else "no", "text/plain")
+            return
         if self.path not in ("/", "/index.html"):
             self.send(404, "Not found\n", "text/plain")
             return
-        fresh_status()
-        self.send(200, render())
+        searching = fresh_status()
+        left = MAX_SECS - (time.time() - sess["issued"])
+        self.send(200, render(sess["csrf"], searching),
+                  hdrs=self.session_cookie(token, max(int(left), 0)))
 
     def do_POST(self):
-        if not self.allowed():
+        if not self.on_lan():
             return
-        n = int(self.headers.get("Content-Length") or 0)
-        form = parse_qs(self.rfile.read(min(n, 4096)).decode())
-        if not hmac.compare_digest(form.get("csrf", [""])[0], csrf_token()):
+        if self.path == "/login":
+            self.login()
+            return
+        token = self.cookie_token()
+        with SESS_LOCK:
+            sess = live_session(token)
+        if not sess:                     # ended: back to the sign-in page
+            self.send(303, "", "text/plain", {"Location": "/"})
+            return
+        form = self.form()
+        if not hmac.compare_digest(form.get("csrf", [""])[0], sess["csrf"]):
             self.send(403, "Page expired - reload and try again.\n",
                       "text/plain")
+            return
+        if self.path == "/logout":
+            with SESS_LOCK:
+                SESSIONS.pop(token, None)
+            self.send(303, "", "text/plain",
+                      {**self.session_cookie("", 0), "Location": "/"})
             return
         with LOCK:
             if self.path == "/refresh":

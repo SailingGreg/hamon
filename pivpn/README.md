@@ -91,7 +91,9 @@ box's label (as KNX Secure devices carry their key). It shows the link to hamon,
 gateway in use and every gateway seen, and can choose a gateway, search again or run the
 connection test. It answers only clients on the Pi's own LAN subnets (never over the VPN),
 locks out for a minute after five wrong codes, and runs as the unprivileged `hapi` user,
-whose only root action is `sudo hapi-agent`.
+whose only root action is `sudo hapi-agent`. Sign-in is a form, not browser basic auth, so
+nothing is remembered by the browser: the session (an in-memory cookie) ends after 30 min
+idle, 4 hours at most, on **Sign out**, when the setup code changes, or when the page restarts.
 
 ```bash
 useradd --system --no-create-home --shell /usr/sbin/nologin hapi
