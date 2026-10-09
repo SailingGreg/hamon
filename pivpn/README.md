@@ -1,7 +1,7 @@
 # Pi-VPN server: admin guide
 
-Site Pis dial **out** to this OpenVPN server. Each Pi gets a fixed tunnel IP `10.8.0.N`,
-which is that site's KNX endpoint for hamon. The Pi forwards `10.8.0.N:3671` to the
+Site Pis dial **out** to this OpenVPN server. Each Pi gets a fixed tunnel IP `10.86.0.N`,
+which is that site's KNX endpoint for hamon. The Pi forwards `10.86.0.N:3671` to the
 site's KNX gateway. No port forwards are needed at the site.
 
 ## Where things are (on the server)
@@ -13,9 +13,9 @@ site's KNX gateway. No port forwards are needed at the site.
 | Server config | `~/pivpn/server.conf` (a copy of `server.conf` here; edit the copy) |
 | One file per site: fixed IP (+ LAN map) | `~/pivpn/ccd/<name>` |
 | Client configs to give to Pis | `~/pivpn/clients/<name>.ovpn` (contain the private key) |
-| Tunnel on the host | `pivpn`, 10.8.0.1/16; UDP 1194 |
+| Tunnel on the host | `pivpn`, 10.86.0.1/16; UDP 1194 |
 
-Address plan: `10.8.0.N` = site N (start at 11), `10.8.0.200+` = bench/test,
+Address plan: `10.86.0.N` = site N (start at 11), `10.86.0.200+` = bench/test,
 `10.100.N.0/24` = site N's LAN as seen through the tunnel (support access, later).
 Pick a free N with `grep -h ifconfig-push ~/pivpn/ccd/*`.
 
@@ -24,7 +24,7 @@ Pick a free N with `grep -h ifconfig-push ~/pivpn/ccd/*`.
 On the server:
 
 ```bash
-docker exec --user "$(id -u)" pivpn-server pivpn-add <name> 10.8.0.N 10.100.N.0
+docker exec --user "$(id -u)" pivpn-server pivpn-add <name> 10.86.0.N 10.100.N.0
 ```
 
 This issues a certificate and a per-client `tls-crypt-v2` key, writes `ccd/<name>`, and
@@ -78,10 +78,10 @@ hapi-agent status            # last result: VPN, gateway, forward, errors
 
 Every gateway it sees is listed in its status (`gateways`). With several tunnelling
 gateways it refuses to guess: the installer picks one on the setup page (below), or from
-the server `ssh pivpn@10.8.0.N sudo hapi-agent pin <serial>` (`unpin` = automatic again;
+the server `ssh pivpn@10.86.0.N sudo hapi-agent pin <serial>` (`unpin` = automatic again;
 the sudo rule allows only `hapi-agent`, with no password). If multicast is blocked, set `gateway_ip`. If the gateway vanishes
 it keeps the last forward and reports the problem. The timer run never takes a tunnel slot
-(it only sends a description request). `pi/hapi-agent.py test 10.8.0.N` run on the server tests
+(it only sends a description request). `pi/hapi-agent.py test 10.86.0.N` run on the server tests
 the whole path the way hamon connects (NAT mode). `fake-gateway.py` stands in for a gateway
 on the bench.
 
@@ -107,10 +107,10 @@ Then check, and point hamon at the tunnel IP:
 
 ```bash
 docker logs --tail 20 pivpn-server | grep <name>   # "Peer Connection Initiated", cipher CHACHA20
-ping -c 3 10.8.0.N                                 # from the server
+ping -c 3 10.86.0.N                                 # from the server
 ```
 
-In hamon-upload set the site's address to `10.8.0.N`, port `3671`. Keep the old address
+In hamon-upload set the site's address to `10.86.0.N`, port `3671`. Keep the old address
 noted as the fallback.
 
 ## Status
@@ -121,7 +121,7 @@ docker logs --since 1h pivpn-server
 ```
 
 Site-Pi health: `hapi-collect.timer` (every 5 min, as greg) fetches each Pi's `hapi-agent`
-status over ssh (`pivpn@10.8.0.N`, prod's key) and publishes it retained on the local broker
+status over ssh (`pivpn@10.86.0.N`, prod's key) and publishes it retained on the local broker
 as `hapi/<name>/status`, with `reachable: false` for a Pi that doesn't answer:
 
 ```bash

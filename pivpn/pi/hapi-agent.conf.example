@@ -9,7 +9,8 @@ gateway_serial =
 gateway_mac =
 
 tun_if = tun0
-vpn_server = 10.8.0.1
+# VPN server address to ping; empty = the first address of tun_if's subnet
+vpn_server =
 search_timeout = 3
 
 # Optional status report (retained JSON).  Off unless mqtt_host is set; the

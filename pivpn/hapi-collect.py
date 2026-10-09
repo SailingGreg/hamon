@@ -12,7 +12,7 @@
 # A Pi that does not answer is published as reachable=false, which a Pi can't
 # report about itself.  Pull, not push: no broker listener on the VPN and no
 # MQTT credentials on the Pis.  Needs this user's ssh key on each Pi
-# (pivpn@10.8.0.N).  Run by hapi-collect.timer; prints one line per Pi.
+# (pivpn@10.86.0.N).  Run by hapi-collect.timer; prints one line per Pi.
 #
 #   hapi-collect.py [-n]       # -n: print the messages, don't publish
 

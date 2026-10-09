@@ -2,9 +2,9 @@
 #
 # setup.sh  -  run the Pi-VPN OpenVPN server (docs/pi-vpn.md) as a container.
 #
-# Site Pis dial out to this server; each gets a fixed tunnel IP 10.8.0.N (its
-# ccd file), which is the site's KNX endpoint for hamon (dns: 10.8.0.N).  The
-# container uses the host network, so the `pivpn` tun and 10.8.0.0/16 appear
+# Site Pis dial out to this server; each gets a fixed tunnel IP 10.86.0.N (its
+# ccd file), which is the site's KNX endpoint for hamon (dns: 10.86.0.N).  The
+# container uses the host network, so the `pivpn` tun and 10.86.0.0/16 appear
 # on the host and hamon reaches the Pis directly.  UDP 1194 must be reachable.
 #
 #   ./setup.sh <public-host> [ca-name]      # as the user that owns the data (greg)
@@ -14,7 +14,7 @@
 # after start-up.  It belongs in the nightly backup.
 #
 # Add a site Pi (prints the path of its inline .ovpn):
-#   docker exec --user "$(id -u)" pivpn-server pivpn-add <name> 10.8.0.N [10.100.N.0]
+#   docker exec --user "$(id -u)" pivpn-server pivpn-add <name> 10.86.0.N [10.100.N.0]
 # Revoke: easyrsa revoke + gen-crl in the container (as the same user), then
 #   remove ccd/<name>; the server re-reads the CRL on each connection.
 #

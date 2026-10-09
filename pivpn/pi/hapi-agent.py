@@ -67,7 +67,7 @@ DEFAULTS = {
     "gateway_serial": "",
     "gateway_mac": "",
     "tun_if": "tun0",
-    "vpn_server": "10.8.0.1",
+    "vpn_server": "",           # empty = first address of tun_if's subnet
     "search_timeout": "3",
     "mqtt_host": "",
     "mqtt_port": "1883",
@@ -321,10 +321,21 @@ def save_json(path, data, mode=0o644):
     os.replace(tmp, path)
 
 
-def if_ip(ifname):
+def if_addr(ifname):
     out = sh("ip", "-o", "-4", "addr", "show", "dev", ifname, check=False)
     parts = out.split()
-    return parts[3].split("/")[0] if "inet" in parts else None
+    return parts[3] if "inet" in parts else None
+
+
+def if_ip(ifname):
+    addr = if_addr(ifname)
+    return addr.split("/")[0] if addr else None
+
+
+def tun_server(ifname):
+    """The VPN server is the first address of the tunnel subnet (topology subnet)."""
+    addr = if_addr(ifname)
+    return str(ipaddress.ip_interface(addr).network[1]) if addr else None
 
 
 def eth0_mac():
@@ -479,8 +490,9 @@ def cmd_run(conf):
     st = {"host": host, "eth0_mac": eth0_mac(),
           "time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "errors": []}
     tun_if = conf["tun_if"]
-    st["vpn"] = {"if": tun_if, "ip": if_ip(tun_if),
-                 "server_reachable": ping(conf["vpn_server"])}
+    server = conf["vpn_server"] or tun_server(tun_if)
+    st["vpn"] = {"if": tun_if, "ip": if_ip(tun_if), "server": server,
+                 "server_reachable": bool(server) and ping(server)}
     if not st["vpn"]["ip"]:
         st["errors"].append("VPN interface %s has no address" % tun_if)
 
