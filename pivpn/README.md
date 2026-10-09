@@ -105,6 +105,17 @@ chown root:hapi /etc/hapi/agent.conf && chmod 640 /etc/hapi/agent.conf
 systemctl daemon-reload && systemctl enable --now hapi-setup
 ```
 
+**Check sudo is locked down** before the Pi leaves the bench. Raspberry Pi Imager can add
+`/etc/sudoers.d/010_pi-nopasswd`, which gives the first user passwordless sudo for
+everything; remove it if present. Then, in a fresh ssh session as `pivpn`:
+
+```bash
+ls /etc/sudoers.d/       # only README and hapi
+sudo -k; sudo -l         # must ask for the password (sudo caches it for 15 min per terminal),
+                         # then: NOPASSWD only for /usr/local/sbin/hapi-agent
+sudo -n true             # must fail: "a password is required"
+```
+
 Then check, and point hamon at the tunnel IP:
 
 ```bash
