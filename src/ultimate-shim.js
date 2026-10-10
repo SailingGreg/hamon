@@ -25,6 +25,10 @@
  *     knx deferred it, KNXUltimate throws; here it is logged and dropped
  * It also drops gateway repeats (same sequence number as the last indication,
  * sent again when our ACK was lost), which would otherwise be stored twice.
+ *
+ * Only connection-level errors reach connection.js: each one arms hamon's
+ * 15-min restart timer, which only a 'connected' clears, so a one-off send
+ * error on a live tunnel would restart the worker 15 min later.
  */
 
 const { EventEmitter } = require('events')
@@ -42,6 +46,7 @@ class UltimateConnection extends EventEmitter {
         const { KNXClient } = require('knxultimate')
 
         this.state = 'connecting'
+        this.closing = false   // Disconnect() called
         this.options = options
 
         if (typeof options.handlers === 'object') {
@@ -50,16 +55,43 @@ class UltimateConnection extends EventEmitter {
             }
         }
 
-        // knxultimate picks its local address from the first suitable interface,
-        // which on a multi-homed host can be one the gateway isn't reached through
-        // (e.g. a private eth1), so connects time out. Ask the kernel which source
-        // address it would use for the gateway - a connected UDP socket sends nothing.
+        this.localAddress((local) => this.start(KNXClient, local))
+    }
+
+    // knxultimate picks its local address from the first suitable interface,
+    // which on a multi-homed host can be one the gateway isn't reached through
+    // (e.g. a private eth1), so connects time out. Ask the kernel which source
+    // address it would use for the gateway - a connected UDP socket sends nothing.
+    // undefined if there is no route: knxultimate then picks for itself
+    localAddress(callback) {
         const probe = dgram.createSocket('udp4')
-        probe.on('error', () => { probe.close(); this.start(KNXClient, undefined) })
-        probe.connect(options.ipPort || 3671, options.ipAddr, () => {
-            const local = probe.address().address
-            probe.close()
-            this.start(KNXClient, local)
+        let done = false
+        const finish = (local) => {
+            if (done) return
+            done = true
+            try { probe.close() } catch (e) { }
+            callback(local)
+        }
+        probe.on('error', () => finish(undefined))
+        probe.connect(this.options.ipPort || 3671, this.options.ipAddr, () => {
+            let local
+            try { local = probe.address().address } catch (e) { }
+            finish(local)
+        })
+    }
+
+    // the route to the gateway may have changed (VPN up/down, DHCP), so check
+    // again before knxultimate reconnects - it binds its new socket to
+    // _options.localIPAddress, 5 s after the disconnect
+    reprobe() {
+        this.localAddress((local) => {
+            if (!local || !this.client || this.closing) return
+            const clientOptions = this.client._options
+            if (clientOptions.localIPAddress !== local) {
+                logger.warn('%s local address %s -> %s', this.options.ipAddr,
+                    clientOptions.localIPAddress, local)
+                clientOptions.localIPAddress = local
+            }
         })
     }
 
@@ -94,17 +126,28 @@ class UltimateConnection extends EventEmitter {
             delete this.lastSeq   // a new tunnel starts its sequence again
             this.emit('connected')
         })
-        this.client.on('disconnected', (reason) => this.disconnected(reason))
+        this.client.on('disconnected', (reason) => {
+            this.disconnected(reason)
+            if (!this.closing) this.reprobe()
+        })
         this.client.on('error', (err) => {
-            // an 'error' with no listener would throw and kill the worker
-            if (this.listenerCount('error') > 0) {
-                this.emit('error', (err && err.message) || String(err))
-            }
+            const message = (err && err.message) || String(err)
+            // a connection-level error is followed at once by a disconnect, so
+            // judge it once the library has acted on it
+            setImmediate(() => {
+                if (this.closing) return
+                if (this.client.isConnected()) {
+                    logger.warn('%s %s (still connected)', this.options.ipAddr, message)
+                    return
+                }
+                // an 'error' with no listener would throw and kill the worker
+                if (this.listenerCount('error') > 0) this.emit('error', message)
+            })
         })
         this.client.on('indication', (packet, echoed) => this.indication(packet, echoed))
 
         // Disconnect() was called before we got here
-        if (this.state === 'disconnecting' || this.state === 'disconnected') return
+        if (this.closing) return
         this.client.Connect()
     }
 
@@ -181,8 +224,12 @@ class UltimateConnection extends EventEmitter {
             this.state, (err && err.message) || err)
     }
 
+    // state stays as it is until the library confirms, as with knx: connection.js
+    // checks for 'idle' after calling this to decide whether to wait for
+    // 'disconnected' (and so for the DISCONNECT_REQUEST to go out) before exiting.
+    // The library gives up waiting for the gateway after 2 s
     Disconnect() {
-        this.state = 'disconnecting'
+        this.closing = true
         if (!this.client) return this.disconnected('Disconnect()')
         this.client.Disconnect()
             .catch(() => {})
