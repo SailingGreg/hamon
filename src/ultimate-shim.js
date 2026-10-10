@@ -28,7 +28,10 @@
  *
  * Only connection-level errors reach connection.js: each one arms hamon's
  * 15-min restart timer, which only a 'connected' clears, so a one-off send
- * error on a live tunnel would restart the worker 15 min later.
+ * error on a live tunnel would restart the worker 15 min later. And only the
+ * first one per outage: knxultimate retries every ~15 s and errors each time,
+ * which would flood error.log and keep pushing the restart timer back, so a
+ * long outage (e.g. a changed DDNS address) would never get the worker restart.
  */
 
 const { EventEmitter } = require('events')
@@ -47,6 +50,8 @@ class UltimateConnection extends EventEmitter {
 
         this.state = 'connecting'
         this.closing = false   // Disconnect() called
+        this.errorForwarded = false   // first error of this outage passed on
+        this.errorsSuppressed = 0
         this.options = options
 
         if (typeof options.handlers === 'object') {
@@ -124,6 +129,12 @@ class UltimateConnection extends EventEmitter {
             this.state = 'idle'
             this.conntime = Date.now()
             delete this.lastSeq   // a new tunnel starts its sequence again
+            if (this.errorsSuppressed > 0) {
+                logger.warn('%s back after %d more connection error(s) not logged',
+                    this.options.ipAddr, this.errorsSuppressed)
+            }
+            this.errorForwarded = false
+            this.errorsSuppressed = 0
             this.emit('connected')
         })
         this.client.on('disconnected', (reason) => {
@@ -140,6 +151,11 @@ class UltimateConnection extends EventEmitter {
                     logger.warn('%s %s (still connected)', this.options.ipAddr, message)
                     return
                 }
+                if (this.errorForwarded) {
+                    this.errorsSuppressed++
+                    return
+                }
+                this.errorForwarded = true
                 // an 'error' with no listener would throw and kill the worker
                 if (this.listenerCount('error') > 0) this.emit('error', message)
             })
