@@ -16,3 +16,6 @@ __pycache__/
 
 # KNX Association standard/application notes (copyrighted, local reference only)
 reference/
+
+# per-location passwords written by hamon-upload (mode 600) - never commit
+.hamon-secrets.json

@@ -42,10 +42,11 @@ cp /etc/grafana/grafana.ini .
 # app data under /home/greg (if present), archived by relative path:
 #   node-red/data - flows + settings.js (credential secret + admin hash)
 #   pivpn         - Pi-VPN server config, ccd and PKI incl. the CA key
+#   hamon/.hamon-secrets.json - per-location passwords from hamon-upload
 NRDATA=node-red/data
 nr=()
-for d in $NRDATA pivpn; do
-	if [ -d /home/greg/$d ]; then
+for d in $NRDATA pivpn hamon/.hamon-secrets.json; do
+	if [ -e /home/greg/$d ]; then
 		nr+=($d)
 	fi
 done
