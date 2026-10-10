@@ -13,3 +13,6 @@ freshness-thresholds.conf
 # per-site VPN launchers/configs on the servers (site names, PSKs) - never commit
 vpn/
 __pycache__/
+
+# KNX Association standard/application notes (copyrighted, local reference only)
+reference/
