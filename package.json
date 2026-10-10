@@ -14,6 +14,9 @@
     "xml-js": "^1.6.11",
     "yargs": "^17.0.1"
   },
+  "optionalDependencies": {
+    "knxultimate": "6.0.8"
+  },
   "name": "hamon",
   "version": "1.0.0",
   "description": "KNX monitoring system",

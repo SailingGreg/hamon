@@ -7,8 +7,7 @@
 
 //const { workerData } = require('worker_threads');
 
-// load knx ip stack
-var knx = require('knx');
+// the knx ip stack is loaded below, once the location's `stack` is known
 var dnsSync = require('dns-sync');
 const yaml = require('js-yaml');
 const fs = require('fs');
@@ -25,8 +24,14 @@ const argv = yargs
     type: 'string',
     nargs: 1,
   })
+  .option('s', {
+    alias: 'stack',
+    description: 'KNX stack: knx or knxultimate (default: the location\'s stack, else knx)',
+    type: 'string',
+    nargs: 1,
+  })
   .scriptName("ha-dump")
-  .usage("Usage: $0 [-c config-file] location")
+  .usage("Usage: $0 [-c config-file] [-s knx|knxultimate] location")
   .argv;
 
 if (argv.config) {
@@ -56,6 +61,7 @@ if (fs.existsSync("./" + configFile)) {
 const doc = yaml.load(fs.readFileSync(configFile, 'utf8'));
 var cnt = 0;
 var knxnetLoc = "";
+var stack;
 for (deploy in doc["locations"]) {
   cnt = cnt + 1;
   install = doc["locations"][deploy]
@@ -67,6 +73,7 @@ for (deploy in doc["locations"]) {
     knxnetXML = install['config'];
     logging = install['logging'];
     phyAddr = install['phyAddr'];
+    stack = install['stack'];
   }
 }
 
@@ -76,6 +83,10 @@ if (knxnetLoc == "") {
   return 1;
 }
 console.log("Dumping %s %s %d (%s)", knxnetLoc, knxnetIP, knxnetPort, knxnetXML);
+// command line beats the location's stack
+if (argv.stack) stack = argv.stack;
+var knx = require('./src/knxstack')(stack);
+console.log("Stack: %s", stack || 'knx');
 // resolve the KNXnet/IP router
 knxnetAddr = dnsSync.resolve(knxnetIP);
 

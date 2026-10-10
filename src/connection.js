@@ -5,7 +5,6 @@
  *
  */
 
-const knx = require('knx')
 const { workerData, parentPort } = require('worker_threads')
 const ets = require('../parsexml')
 const logger = require('./logger')
@@ -17,7 +16,9 @@ const { MQTTconnect, mqdisconnect } = require('./mqwrite')
 const { loadmapping, mapstring } = require('./strtodpt')
 const fs = require('fs');
 // added device so switch can be appropriate
-const { dns, port, config, name, path, influxver, logging, device, phyAddr } = workerData?.location
+const { dns, port, config, name, path, influxver, logging, device, phyAddr, stack } = workerData?.location
+// knx (default) or knxultimate - same API either way, see knxstack.js
+const knx = require('./knxstack')(stack)
 
 // exit if signaled
 parentPort.on("message", (value) => {
@@ -72,7 +73,7 @@ var timerHandle = null; // the link for the timer
 
 const knxAddr = dnsSync.resolve(dns)
 
-logger.info('KNXnet/IP %s -> %s', dns, knxAddr)
+logger.info('KNXnet/IP %s -> %s (stack %s)', dns, knxAddr, stack || 'knx')
 
 // unresolved: knx would silently fall back to the multicast default and look
 // 'connected' with no data - so fail; service.js logs it and retries with
