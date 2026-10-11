@@ -13,7 +13,7 @@ const { writeEventsv2 } = require('./dbv2')
 const dnsSync = require('dns-sync')
 const { MQTTconnect, mqdisconnect } = require('./mqwrite')
 //const strtodpt = require('./strtodpt')
-const { loadmapping, mapstring } = require('./strtodpt')
+const { loadmapping, mapstring, mapaddress } = require('./strtodpt')
 const fs = require('fs');
 // added device so switch can be appropriate
 const { dns, port, config, name, path, influxver, logging, device, phyAddr, stack } = workerData?.location
@@ -161,10 +161,27 @@ const connection = knx.Connection({
         var cnt = 0;
         var udefined = 0;
         let remapped = 0;
+        let overridden = 0;
         for (let key in groupAddresses) {
             // debugging on load
           if (groupAddresses.hasOwnProperty(key)) {
             // how do check if DPT is defined?
+
+            // an exact-address rule comes first: it can replace a wrong
+            // ETS dpt ('override') and the misleading name that goes with it
+            const arule = mapaddress(name, key);
+            if (arule !== undefined) {
+                if (arule.dpt !== undefined &&
+                    (arule.override || groupAddresses[key].dpt == undefined)) {
+                    if (groupAddresses[key].dpt == undefined)
+                        remapped++;
+                    else
+                        overridden++;
+                    groupAddresses[key].dpt = arule.dpt;
+                }
+                if (arule.name !== undefined)
+                    groupAddresses[key].name = arule.name;
+            }
 
             // map name string to dtp
             if (groupAddresses[key].dpt == undefined) {
@@ -206,8 +223,8 @@ const connection = knx.Connection({
             cnt = cnt + 1
           }
         }
-        logger.info('GA for %s: %j (%d undefined/%d remapped)',
-                                            name, cnt, udefined, remapped);
+        logger.info('GA for %s: %j (%d undefined/%d remapped/%d overridden)',
+                                name, cnt, udefined, remapped, overridden);
         // and then connect to MQTT
         MQTTconnect(groupAddresses, connection, workerData?.location)
 
