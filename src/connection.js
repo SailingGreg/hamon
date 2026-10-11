@@ -17,6 +17,23 @@ const { loadmapping, mapstring } = require('./strtodpt')
 const fs = require('fs');
 // added device so switch can be appropriate
 const { dns, port, config, name, path, influxver, logging, device, phyAddr, stack } = workerData?.location
+
+// label everything this worker prints (knx library warnings, stray console.log)
+// with the site name, so lines in hamon.log say which site they came from -
+// our own logger calls go to combined.log and already carry the name
+for (const stream of [process.stdout, process.stderr]) {
+    const write = stream.write.bind(stream)
+    let lineStart = true
+    stream.write = (chunk, ...rest) => {
+        if (typeof chunk !== 'string') {
+            chunk = chunk.toString()
+            if (typeof rest[0] === 'string') rest.shift() // encoding was for the buffer
+        }
+        const out = (lineStart ? `[${name}] ` : '') + chunk.replace(/\n(?=.)/g, `\n[${name}] `)
+        lineStart = chunk.endsWith('\n')
+        return write(out, ...rest)
+    }
+}
 // knx (default) or knxultimate - same API either way, see knxstack.js
 const knx = require('./knxstack')(stack)
 
