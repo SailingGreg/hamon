@@ -31,8 +31,7 @@ etsProjectParser("./" + fileArg, passwordArg).then((project) => {
     for (let key in groupAddresses) {
         addr++;
         if (groupAddresses.hasOwnProperty(key)) {
-            //if (groupAddresses[key].dpt != undefined)
-            if (groupAddresses[key].datapointType != undefined)
+            if (groupAddresses[key].dpt != undefined)
                 dpts++;
             // console.log(key, groupAddresses[key].dpt,
             //     groupAddresses[key].name);
@@ -49,4 +48,13 @@ etsProjectParser("./" + fileArg, passwordArg).then((project) => {
     });
 
     console.log("%s has %d entries, %d with values and %d DPTs", fileArg, addr, ga, dpts);
+}).catch(err => {
+    if (err.message == 'BAD_PASSWORD') {
+        console.error('Passed password is incorrect')
+    } else if (err.message == 'MISSING_PASSWORD') {
+        console.error('This project is password protected: pass the password after the file name')
+    } else {
+        console.error(err.message)
+    }
+    process.exit(1)
 })
