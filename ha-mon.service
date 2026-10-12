@@ -14,7 +14,7 @@ Environment=HOME=/home/greg
 Type=idle
 
 # working directory is /home/greg/hamon
-ExecStart=/usr/bin/node /home/greg/hamon/src/hamon.js
+ExecStart=/opt/node24/bin/node /home/greg/hamon/src/hamon.js
 StandardOutput=append:/home/greg/hamon/hamon.log
 StandardError=append:/home/greg/hamon/hamon.err
 
