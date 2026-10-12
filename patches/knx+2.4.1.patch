@@ -1,0 +1,54 @@
+diff --git a/node_modules/knx/src/FSM.js b/node_modules/knx/src/FSM.js
+index 73ac9ff..c3c74b7 100644
+--- a/node_modules/knx/src/FSM.js
++++ b/node_modules/knx/src/FSM.js
+@@ -386,19 +386,36 @@ module.exports = machina.Fsm.extend({
+           '(%s): Requesting Connection State',
+           this.compositeState()
+         );
+-        this.send(
+-          this.prepareDatagram(
+-            KnxConstants.SERVICE_TYPE.CONNECTIONSTATE_REQUEST
+-          )
+-        );
+-        // TODO: handle send err
+-        //
+-        this.connstatetimer = setTimeout(() => {
+-          const msg = 'timed out waiting for CONNECTIONSTATE_RESPONSE';
+-          KnxLog.get().trace('(%s): %s', this.compositeState(), msg);
+-          this.transition('connecting');
+-          this.emit('error', msg);
+-        }, 1000);
++        // --- hamon patch 2026-06-02: spec-compliant KNXnet/IP heartbeat timing ---
++        // KNXnet/IP Core: CONNECTIONSTATE_REQUEST_TIMEOUT = 10s, client repeats the
++        // request up to 3x before declaring the tunnel dead (server CONNECTION_ALIVE_TIME
++        // = 120s). Original was 1000ms + immediate teardown, which reconnected healthy
++        // tunnels on a single >1s round-trip over VPN (hourly reconnect noise on a VPN site).
++        this.connstateattempts = 0;
++        const sendConnState = () => {
++          this.send(
++            this.prepareDatagram(
++              KnxConstants.SERVICE_TYPE.CONNECTIONSTATE_REQUEST
++            )
++          );
++          // TODO: handle send err
++          this.connstatetimer = setTimeout(() => {
++            this.connstateattempts += 1;
++            if (this.connstateattempts <= 3) {
++              KnxLog.get().debug(
++                '(%s): CONNECTIONSTATE_RESPONSE timeout, retry %d/3',
++                this.compositeState(), this.connstateattempts
++              );
++              sendConnState();
++            } else {
++              const msg = 'timed out waiting for CONNECTIONSTATE_RESPONSE';
++              KnxLog.get().trace('(%s): %s', this.compositeState(), msg);
++              this.transition('connecting');
++              this.emit('error', msg);
++            }
++          }, 10000);
++        };
++        sendConnState();
+       },
+       _onExit() {
+         clearTimeout(this.connstatetimer);

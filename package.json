@@ -6,16 +6,14 @@
     "influxdb-v2": "^1.0.0",
     "js-yaml": "^4.1.0",
     "knx": "2.4.1",
-    "knx.js": "^0.7.4",
+    "knxultimate": "6.0.8",
     "mqtt": "^4.2.6",
+    "patch-package": "^8.0.0",
     "sax": "^1.2.4",
     "unzipper": "^0.10.11",
     "winston": "^3.3.3",
     "xml-js": "^1.6.11",
     "yargs": "^17.0.1"
-  },
-  "optionalDependencies": {
-    "knxultimate": "6.0.8"
   },
   "name": "hamon",
   "version": "1.0.0",
@@ -25,7 +23,8 @@
   "author": "Greg Brougham <greg.brougham@gmail.com>",
   "license": "MIT",
   "scripts": {
-    "lint": "eslint parsexml.js ./src"
+    "lint": "eslint parsexml.js ./src",
+    "postinstall": "patch-package"
   },
   "devDependencies": {
     "babel-eslint": "^10.1.0",
