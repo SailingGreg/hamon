@@ -30,8 +30,13 @@ const argv = yargs
     type: 'string',
     nargs: 1,
   })
+  .option('l', {
+    alias: 'length',
+    description: 'Show each telegram\'s APDU length (knx stack only): tells a 6-bit value packed into the APCI from a separate data byte',
+    type: 'boolean',
+  })
   .scriptName("ha-dump")
-  .usage("Usage: $0 [-c config-file] [-s knx|knxultimate] location")
+  .usage("Usage: $0 [-c config-file] [-s knx|knxultimate] [-l] location")
   .argv;
 
 if (argv.config) {
@@ -109,13 +114,14 @@ var connection = knx.Connection({
     },
     event: function (evt, src, dest, value) {
       console.log(
-        '%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j, name: %j',
+        '%s **** KNX EVENT: %j, src: %j, dest: %j, value: %j, name: %j%s',
         new Date().toISOString().replace(/T/, ' ').replace(/\..+/, ''),
         evt,
         src,
         dest,
         value,
-        loc
+        loc,
+        argv.length ? apduInfo() : ''
       )
     },
     error: function (connstatus) {
@@ -123,6 +129,28 @@ var connection = knx.Connection({
     }
   }
 })
+
+// -l: knx delivers a 6-bit value packed into the APCI (DPT1/2/3) and a separate
+// data byte (DPT5/6/20 ...) both as a 1-byte buffer; the APDU length tells them
+// apart. emitEvent() runs just before the event handler, so note its datagram.
+var lastApduLength;
+if (argv.length) {
+  if (typeof connection.emitEvent === 'function') {
+    const emitEvent = connection.emitEvent;
+    connection.emitEvent = function (datagram) {
+      lastApduLength = datagram.cemi.apdu.apdu_length;
+      return emitEvent.call(this, datagram);
+    };
+  } else {
+    console.log("-l: APDU length is only available on the knx stack");
+  }
+}
+function apduInfo() {
+  if (lastApduLength === undefined) return ', apdu: n/a';
+  const n = lastApduLength;
+  lastApduLength = undefined;
+  return n <= 1 ? ', apdu: 6-bit (in APCI)' : `, apdu: ${n - 1} data byte(s)`;
+}
 
 function exitHandler(options) {
   if(connection.state === 'connected' || connection.state === 'idle') {
