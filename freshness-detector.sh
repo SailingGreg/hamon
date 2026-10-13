@@ -29,8 +29,16 @@
 #       cooldown      wait after the first restart of a stale spell; doubles
 #                     with each further restart ...
 #       cooldown_max  ... up to this cap
+#     Optional reserved key:
+#       grace         new-site grace period (default 1440 = 24h, 0 = off)
 #     Any other key is a location (case-exact, as in Influx) whose threshold
 #     overrides `default` - for low-traffic sites with long normal quiet spells.
+#   * Grace: a site whose first knx2 point (within FIRST_LOOKBACK) is younger
+#     than `grace` is reported but never restarted.  Sites added through
+#     hamon-upload start sending before anyone knows their normal traffic, and
+#     a quiet new site would otherwise be restarted for nothing.  A site back
+#     from more than FIRST_LOOKBACK of silence counts as new too.  The extra
+#     query only runs on scans that find a stale site.
 #   * Cooldown: a site that stays stale is restarted at once, then after
 #     cooldown, 2x, 4x ... cooldown_max, instead of on every 5-minute run.  The
 #     spell (and the doubling) resets as soon as the site is seen fresh again.
@@ -43,8 +51,9 @@
 #   DRYRUN=0 ./freshness-detector.sh     # act: restart stale sites
 # From cron (every 5 min; output is already in LOG, so discard it or cron mails it):
 #   */5 * * * * DRYRUN=0 /home/greg/hamon/freshness-detector.sh >/dev/null 2>&1
-# Env overrides: THRESH_MIN, COOLDOWN_MIN, COOLDOWN_MAX (beat the file),
-#   THRESH_FILE, STATE, SECRETS, WINDOW, ORG, BUCKET, SLACK_WEBHOOK, SLACK_CHANNEL
+# Env overrides: THRESH_MIN, COOLDOWN_MIN, COOLDOWN_MAX, GRACE_MIN (beat the
+#   file), THRESH_FILE, STATE, SECRETS, WINDOW, FIRST_LOOKBACK, ORG, BUCKET,
+#   SLACK_WEBHOOK, SLACK_CHANNEL
 
 set -uo pipefail
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"   # cron's PATH is minimal
@@ -60,6 +69,7 @@ SECRETS="${SECRETS:-$HAMON/.freshness.env}"      # provides SLACK_WEBHOOK (optio
 ORG="${ORG:-HA}"
 BUCKET="${BUCKET:-hamon}"
 THRESH_FILE="${THRESH_FILE:-$HAMON/freshness-thresholds.conf}"  # thresholds + cooldown
+FIRST_LOOKBACK="${FIRST_LOOKBACK:-30d}"   # how far back "first point" looks (grace)
 WINDOW="${WINDOW:-24h}"                  # freshness query lookback (>> THRESH_MIN);
                                          # must exceed worst tolerated outage or a
                                          # hard-down site ages out of the report
@@ -118,6 +128,29 @@ from(bucket:\"$BUCKET\")
    | awk -F, 'NR>3 && $5!="" && $5!="location"{print $5","$4}'
 }
 
+# per-location first point in FIRST_LOOKBACK (same CSV shape as freshness).
+# first() per series is pushed down to storage; group and min() only after it.
+firstseen() {
+  influx query --org "$ORG" "${TOKARG[@]}" --raw "
+from(bucket:\"$BUCKET\")
+  |> range(start:-$FIRST_LOOKBACK)
+  |> filter(fn:(r)=> r._measurement==\"knx2\" and r._field==\"value\")
+  |> first()
+  |> group(columns:[\"location\"])
+  |> min(column:\"_time\")
+  |> keep(columns:[\"location\",\"_time\"])
+" 2>/dev/null | tr -d '\r' \
+   | awk -F, 'NR>3 && $5!="" && $5!="location"{print $5","$4}'
+}
+declare -A FIRST=(); first_loaded=0
+load_first() {  # once per run, and only when a site is stale (not in a subshell)
+  local l t
+  while IFS=, read -r l t; do
+    [ -n "$l" ] && FIRST["$l"]=$(date -u -d "$t" +%s 2>/dev/null)
+  done < <(firstseen)
+  first_loaded=1
+}
+
 # ---- thresholds + cooldown (THRESH_FILE; env beats file) --------------------
 declare -A SITE_THRESH=()
 declare -A CONF=()
@@ -128,7 +161,7 @@ if [ -f "$THRESH_FILE" ]; then
       log "WARN  $THRESH_FILE: ignoring bad value for '$key': '$mins'"; continue
     fi
     case "$key" in
-      default|cooldown|cooldown_max) CONF["$key"]="$mins" ;;
+      default|cooldown|cooldown_max|grace) CONF["$key"]="$mins" ;;
       *) SITE_THRESH["$key"]="$mins" ;;
     esac
   done < "$THRESH_FILE"
@@ -136,6 +169,7 @@ fi
 THRESH_MIN="${THRESH_MIN:-${CONF[default]:-}}"
 COOLDOWN_MIN="${COOLDOWN_MIN:-${CONF[cooldown]:-}}"
 COOLDOWN_MAX="${COOLDOWN_MAX:-${CONF[cooldown_max]:-}}"
+GRACE_MIN="${GRACE_MIN:-${CONF[grace]:-1440}}"
 if [ -z "$THRESH_MIN" ] || [ -z "$COOLDOWN_MIN" ] || [ -z "$COOLDOWN_MAX" ]; then
   log "ERROR $THRESH_FILE must set default, cooldown and cooldown_max - not scanning"
   slack "HAMON freshness detector NOT RUNNING: $THRESH_FILE missing default/cooldown/cooldown_max"
@@ -197,7 +231,7 @@ container_for() {  # container_for <ip> <site>
 # ---- main -------------------------------------------------------------------
 now=$(date -u +%s)
 mode_tag=$([ "$DRYRUN" = 0 ] && echo "ACT" || echo "DRYRUN")
-log "freshness scan start ($mode_tag) default=${THRESH_MIN}m overrides=${#SITE_THRESH[@]} cooldown=${COOLDOWN_MIN}-${COOLDOWN_MAX}m window=-${WINDOW}"
+log "freshness scan start ($mode_tag) default=${THRESH_MIN}m overrides=${#SITE_THRESH[@]} cooldown=${COOLDOWN_MIN}-${COOLDOWN_MAX}m grace=${GRACE_MIN}m window=-${WINDOW}"
 
 stale=0 acted=0
 while IFS=, read -r loc ts; do
@@ -212,6 +246,16 @@ while IFS=, read -r loc ts; do
   if [ "$enabled" = "false" ]; then
     log "SKIP  $loc stale ${age}m but enabled:false"
     continue
+  fi
+
+  # grace: a new site is reported but left alone until its traffic is known
+  if [ "$GRACE_MIN" -gt 0 ]; then
+    [ "$first_loaded" = 1 ] || load_first
+    fage=""; [ -n "${FIRST[$loc]:-}" ] && fage=$(( (now - FIRST[$loc]) / 60 ))
+    if [ -n "$fage" ] && [ "$fage" -lt "$GRACE_MIN" ]; then
+      log "NEW   $loc ${age}m (>=${thresh}m) first data ${fage}m ago, in ${GRACE_MIN}m grace - not restarted"
+      continue
+    fi
   fi
 
   # cooldown: restart now on the first stale scan, then after cooldown, 2x ...
