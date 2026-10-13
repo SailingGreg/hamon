@@ -1,5 +1,5 @@
 diff --git a/node_modules/knx/src/FSM.js b/node_modules/knx/src/FSM.js
-index 73ac9ff..c3c74b7 100644
+index 73ac9ff..2411182 100644
 --- a/node_modules/knx/src/FSM.js
 +++ b/node_modules/knx/src/FSM.js
 @@ -386,19 +386,36 @@ module.exports = machina.Fsm.extend({
@@ -52,3 +52,36 @@ index 73ac9ff..c3c74b7 100644
        },
        _onExit() {
          clearTimeout(this.connstatetimer);
+diff --git a/node_modules/knx/src/dptlib/dpt20.js b/node_modules/knx/src/dptlib/dpt20.js
+index cb239ca..d6b78ee 100644
+--- a/node_modules/knx/src/dptlib/dpt20.js
++++ b/node_modules/knx/src/dptlib/dpt20.js
+@@ -37,4 +37,28 @@ exports.subtypes = {
+     scalar_range: [,],
+     range: [,],
+   },
++  // --- hamon patch 2026-10-13: more DPT 20 subtypes (all 1-byte enumerations) ---
++  // Without a subtype hamon got no type name and silently didn't store these.
++  // Quoted keys: resolve() looks subtypes up by the digits as given (DPT20.007).
++  '105': {
++    name: 'DPT_HVACContrMode', // 20.105 HVAC control mode: 0 auto, 1 heat, 2 morning warmup, 3 cool ... 20 NoDem
++    desc: 'HVAC control mode',
++    unit: '',
++    scalar_range: [,],
++    range: [,],
++  },
++  '107': {
++    name: 'DPT_ChangeoverMode', // 20.107 changeover mode: 0 auto, 1 cooling only, 2 heating only
++    desc: 'changeover mode',
++    unit: '',
++    scalar_range: [,],
++    range: [,],
++  },
++  '007': {
++    name: 'DPT_AlarmClassType', // 20.007 alarm class type: 1 simple, 2 basic, 3 extended
++    desc: 'alarm class type',
++    unit: '',
++    scalar_range: [,],
++    range: [,],
++  },
+ };
