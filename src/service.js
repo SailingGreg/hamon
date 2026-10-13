@@ -22,6 +22,7 @@ const RESTART_FREE = 3
 const BACKOFF_BASE = 15 * 60 * 1000 // 15min
 const BACKOFF_MAX = 4 * 60 * 60 * 1000 // 4h
 const failures = {} // consecutive restarts without a connection, by name
+const everConnected = new Set() // sites that have connected since hamon started
 const pending = {} // back-off timers, by name
 
 function backoffDelay(count) {
@@ -96,8 +97,10 @@ function start_worker(path, influxver, loc) {
     */
     loc["worker"]=""; // delete the worker so the structure can be cloned
 
+    // a site that hasn't connected since hamon started gives up after a few
+    // minutes and goes into the restart back-off (see connection.js)
     const worker = new Worker(path + './src/connection.js', {
-                                    workerData: { location: loc }
+                                    workerData: { location: loc, connectedBefore: everConnected.has(loc.name) }
     })
     threads.add(worker)
 
@@ -110,6 +113,7 @@ function start_worker(path, influxver, loc) {
     worker.on('message', (data) => {
        if (data && data.connected) { // KNX link up - clear the back-off
            failures[data.connected] = 0;
+           everConnected.add(data.connected);
        } else {
            requestRestart(data); // worker timed out - pass location
        }

@@ -100,6 +100,19 @@ function handleTimeout() {
 
 var timerHandle = null; // the link for the timer
 
+// a site that has never connected since hamon started (dead, or not there yet)
+// would otherwise retry forever inside the KNX stack, logging every few
+// seconds; after FIRST_CONNECT_WAIT give up and let service.js restart it with
+// back-off (up to 4h). Sites that have connected before keep retrying here.
+const FIRST_CONNECT_WAIT = 5 * 60 * 1000 // 5min
+var firstConnectHandle = null
+if (workerData?.connectedBefore !== true) {
+    firstConnectHandle = setTimeout(() => {
+        logger.info('%s: not connected within %d min', name, FIRST_CONNECT_WAIT / 60000);
+        handleTimeout();
+    }, FIRST_CONNECT_WAIT);
+}
+
 const knxAddr = dnsSync.resolve(dns)
 
 logger.info('KNXnet/IP %s -> %s (stack %s)', dns, knxAddr, stack || 'knx')
@@ -174,6 +187,10 @@ const connection = knx.Connection({
         let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
         logger.info('%s Connected - %s (%d)', ctime, name, ld - last_err);
         parentPort.postMessage({ connected: name }); // resets restart back-off
+        if (firstConnectHandle != null) {
+            clearTimeout(firstConnectHandle);
+            firstConnectHandle = null;
+        }
 
         if (timerHandle != null) {
             clearTimeout(timerHandle);
