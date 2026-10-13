@@ -35,6 +35,17 @@ for (const stream of [process.stdout, process.stderr]) {
         return write(out, ...rest)
     }
 }
+// knx's dptlib (used by both stacks) logs through log-driver's default logger,
+// which is created at 'trace', so every DPT 20/21 decode printed a [debug]
+// 'fromBuffer' line whatever the site's logging. Quieten it to the site's level:
+// the levels below it become no-ops on the object dptlib holds
+{
+    const defaultLog = require('log-driver').logger
+    const levels = defaultLog.levels
+    const keep = levels.includes(logging) ? levels.indexOf(logging) : levels.indexOf('info')
+    levels.forEach((lvl, i) => { if (i > keep) defaultLog[lvl] = () => {} })
+}
+
 // knx (default) or knxultimate - same API either way, see knxstack.js
 const knx = require('./knxstack')(stack)
 
