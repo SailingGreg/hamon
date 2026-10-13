@@ -20,7 +20,10 @@
  * tunnelling over TCP: tunnel user ID + password and the gateway's device
  * authentication code, given directly (no keyring). knxultimate only takes Data
  * Secure group keys from a keyring and resets them at every session start, so
- * the shim adds ours straight after that (secureEnsureKeyring). A failed secure
+ * the shim adds ours straight after that (secureEnsureKeyring), and checks on
+ * every connect that they are really in the library's map: that relies on
+ * knxultimate internals, and a library change would otherwise just stop Data
+ * Secure GAs decoding without a word. A failed secure
  * authentication won't be fixed by retrying every 15 s, so it stops the
  * library's auto-reconnect and leaves the retry to hamon's restart back-off.
  *
@@ -146,6 +149,7 @@ class UltimateConnection extends EventEmitter {
         if (secure && Object.keys(secure.groupKeys).length > 0) this.addGroupKeys(secure.groupKeys)
 
         this.client.on('connected', () => {
+            if (secure) this.checkGroupKeys()
             this.state = 'idle'
             this.conntime = Date.now()
             delete this.lastSeq   // a new tunnel starts its sequence again
@@ -198,6 +202,12 @@ class UltimateConnection extends EventEmitter {
     // leaves it empty. Relies on knxultimate internals (pinned by the lockfile)
     addGroupKeys(groupKeys) {
         const client = this.client
+        this.groupKeys = groupKeys
+        if (typeof client.secureEnsureKeyring !== 'function' || typeof client.secureParseGroupAddress !== 'function') {
+            logger.error('%s KNX Secure: can\'t add %d Data Secure key(s): knxultimate no longer has the internals the shim uses - ' +
+                'Data Secure GAs won\'t decode', this.options.ipAddr, Object.keys(groupKeys).length)
+            return
+        }
         const ensure = client.secureEnsureKeyring.bind(client)
         client.secureEnsureKeyring = async (...args) => {
             await ensure(...args)
@@ -205,6 +215,32 @@ class UltimateConnection extends EventEmitter {
                 client._secureGroupKeys.set(client.secureParseGroupAddress(ga), Buffer.from(key, 'base64').subarray(0, 16))
             }
         }
+    }
+
+    // after the session handshake (which runs secureEnsureKeyring): are all our
+    // Data Secure keys in the map the library decrypts with? An error log, not
+    // an 'error' event - plain GAs still flow, and a restart wouldn't fix it
+    checkGroupKeys() {
+        if (!this.groupKeys) return
+        const client = this.client
+        const map = client._secureGroupKeys
+        const all = Object.entries(this.groupKeys)
+        const missing = all.filter(([ga, key]) => {
+            try {
+                const have = map instanceof Map && map.get(client.secureParseGroupAddress(ga))
+                return !(Buffer.isBuffer(have) && have.equals(Buffer.from(key, 'base64').subarray(0, 16)))
+            } catch (e) {
+                return true
+            }
+        }).map(([ga]) => ga)
+        if (missing.length > 0) {
+            logger.error('%s KNX Secure: %d of %d Data Secure key(s) not in knxultimate\'s key map (%s) - those GAs won\'t decode; ' +
+                'knxultimate internals may have changed', this.options.ipAddr, missing.length, all.length,
+                missing.slice(0, 5).join(', ') + (missing.length > 5 ? ', ...' : ''))
+        } else if (!this.groupKeysChecked) {
+            logger.info('%s KNX Secure: %d Data Secure key(s) in place', this.options.ipAddr, all.length)
+        }
+        this.groupKeysChecked = true
     }
 
     disconnected(reason) {
