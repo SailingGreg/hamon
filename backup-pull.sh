@@ -6,11 +6,12 @@
 # and keeps about a week of them here. It pulls rather than prod pushing, so
 # prod cannot touch these copies. On prod this key is restricted in
 # ~greg/.ssh/authorized_keys to the read-only forced command:
-#   from="<staging ip>",command="/usr/local/sbin/hamon-backup-rsync",restrict ssh-ed25519 ...
+#   from="10.107.91.3",command="/usr/local/sbin/hamon-backup-rsync",restrict ssh-ed25519 ...
 #
 # cron (staging):  0 2 * * * /home/greg/hamon/backup-pull.sh >> /home/greg/hamon/tmp/backup-pull.log 2>&1
 
-SRC=greg@home.monitor-software.com:/var/opt/hamon
+# over the internal network (eth1), so it does not depend on prod's public routing
+SRC=greg@10.107.91.4:/var/opt/hamon
 DEST=/home/greg/backups/home.monitor-software.com
 BK=$DEST/backups
 KEY=/home/greg/.ssh/id_backup_pull
@@ -22,7 +23,7 @@ echo "$(date '+%F %T') pull start"
 # the forced command only allows /var/opt/hamon itself, so filter to backups/influx.*
 # --fuzzy lets yesterday's tarball be the delta basis for today's new name
 rsync -a --fuzzy --partial --include='backups/' --include='backups/influx.*' --exclude='*' \
-	-e "ssh -i $KEY -o BatchMode=yes" "$SRC/" "$DEST/"
+	-e "ssh -i $KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new" "$SRC/" "$DEST/"
 rc=$?
 if [ $rc -ne 0 ]; then
 	echo "$(date '+%F %T') rsync failed (rc=$rc), not pruning" >&2
