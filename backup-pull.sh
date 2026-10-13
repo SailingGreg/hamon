@@ -21,8 +21,9 @@ mkdir -p "$BK" || exit 1
 echo "$(date '+%F %T') pull start"
 
 # the forced command only allows /var/opt/hamon itself, so filter to backups/influx.*
+# --chmod: prod's backups dir is 777, do not copy that
 # --fuzzy lets yesterday's tarball be the delta basis for today's new name
-rsync -a --fuzzy --partial --include='backups/' --include='backups/influx.*' --exclude='*' \
+rsync -a --chmod=Dgo-w --fuzzy --partial --include='backups/' --include='backups/influx.*' --exclude='*' \
 	-e "ssh -i $KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new" "$SRC/" "$DEST/"
 rc=$?
 if [ $rc -ne 0 ]; then
