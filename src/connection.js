@@ -16,7 +16,8 @@ const { MQTTconnect, mqdisconnect } = require('./mqwrite')
 const { loadmapping, mapstring, mapaddress } = require('./strtodpt')
 const fs = require('fs');
 // added device so switch can be appropriate
-const { dns, port, config, name, path, influxver, logging, device, phyAddr, stack } = workerData?.location
+const { dns, port, config, name, path, influxver, logging, device, phyAddr, stack, secure } = workerData?.location
+const { secureOptions } = require('./secrets')
 
 // label everything this worker prints (knx library warnings, stray console.log)
 // with the site name, so lines in hamon.log say which site they came from -
@@ -99,6 +100,16 @@ if (knxAddr == null) {
     throw new Error(`DNS lookup failed for ${dns}`);
 }
 
+// KNX Secure tunnelling: the values come from .hamon-secrets.json (see
+// secrets.js); anything missing or not matching the site throws, as above
+let secureTunnel
+if (secure === true) {
+    secureTunnel = secureOptions(path, workerData.location)
+    logger.info('%s: KNX Secure tunnel %s (user %d) on gateway %s, %d Data Secure GA(s)', name,
+        secureTunnel.tunnelIA, secureTunnel.userId, secureTunnel.gateway,
+        Object.keys(secureTunnel.groupKeys).length)
+}
+
 //console.log("connection.js %s", path);
 
 // READ CONFIG FILE
@@ -141,6 +152,7 @@ const connection = knx.Connection({
   forceTunneling: device == "generic" ? true : false,
   suppress_ack_ldatareq: (device == "loxone" || device == "eibport") ? true : false,
   physAddr: phyAddr,
+  secure: secureTunnel,   // knxultimate only; undefined = plain tunnelling
   loglevel: logging,
   handlers: {
     connected: function () {

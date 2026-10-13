@@ -146,6 +146,8 @@ function compareLoc(oldLoc, newLoc) {
     if (oldLoc['phyAddr'] != newLoc['phyAddr']) change = true;
     if (oldLoc['config'] != newLoc['config']) change = true;
     if (oldLoc['stack'] != newLoc['stack']) change = true;
+    if (oldLoc['secure'] != newLoc['secure']) change = true;
+    if (oldLoc['tunnelIA'] != newLoc['tunnelIA']) change = true;
 
     return change; // return flag
 }

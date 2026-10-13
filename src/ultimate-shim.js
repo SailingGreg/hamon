@@ -5,7 +5,7 @@
  * Connection, so that is all this provides:
  *
  *   Connection({ ipAddr, ipPort, physAddr, suppress_ack_ldatareq, loglevel,
- *                handlers: { connected, event, error } })
+ *                secure, handlers: { connected, event, error } })
  *   .state            'idle' while connected (what connection.js tests for)
  *   .conntime         set while connected (knx.Datapoint autoread checks it)
  *   .write(ga, value, dptid, cb) / .read(ga, cb) / .Disconnect()
@@ -16,7 +16,16 @@
  * Telegram payloads are passed on raw, so knx.Datapoint decodes them with knx's
  * own dptlib exactly as before, and writes are encoded with the same dptlib.
  *
- * Plain tunnelling over UDP only for now; KNX Secure (TCP) comes later.
+ * Plain tunnelling over UDP, or with `secure` (from secrets.js) KNX Secure
+ * tunnelling over TCP: tunnel user ID + password and the gateway's device
+ * authentication code, given directly (no keyring). knxultimate only takes Data
+ * Secure group keys from a keyring and resets them at every session start, so
+ * the shim adds ours straight after that (secureEnsureKeyring), and checks on
+ * every connect that they are really in the library's map: that relies on
+ * knxultimate internals, and a library change would otherwise just stop Data
+ * Secure GAs decoding without a word. A failed secure
+ * authentication won't be fixed by retrying every 15 s, so it stops the
+ * library's auto-reconnect and leaves the retry to hamon's restart back-off.
  *
  * Unlike knx, KNXUltimate throws where knx coped quietly, and those throws
  * would kill the worker, so the shim catches them:
@@ -42,6 +51,9 @@ const logger = require('./logger')
 // knxultimate logs telegrams at 'info', which would flood hamon.log with what
 // hamon already logs itself - so 'info' maps to 'warn'
 const LOGLEVEL = { error: 'error', warn: 'warn', info: 'warn', debug: 'debug', trace: 'trace' }
+
+// knxultimate's messages for a secure session the gateway or we refused
+const SECURE_AUTH_FAILED = /authentication failed|MAC verification failed|session rejected/i
 
 class UltimateConnection extends EventEmitter {
     constructor(options) {
@@ -114,18 +126,30 @@ class UltimateConnection extends EventEmitter {
 
     startClient(KNXClient, localIPAddress) {
         const options = this.options
+        const secure = options.secure
         this.client = new KNXClient({
-            hostProtocol: 'TunnelUDP',
+            hostProtocol: secure ? 'TunnelTCP' : 'TunnelUDP',
             ipAddr: options.ipAddr,
             ipPort: options.ipPort || 3671,
-            physAddr: options.physAddr || '15.15.15',   // knx's default
+            physAddr: options.physAddr || '15.15.15',   // knx's default; secure: the gateway assigns it
             localIPAddress,
             suppress_ack_ldatareq: !!options.suppress_ack_ldatareq,
             loglevel: LOGLEVEL[options.loglevel] || 'error',
             autoReconnect: true,   // knx's FSM reconnects by itself too
+            ...(secure ? {
+                isSecureKNXEnabled: true,
+                secureTunnelConfig: {
+                    tunnelInterfaceIndividualAddress: secure.tunnelIA,
+                    tunnelUserId: secure.userId,
+                    tunnelUserPassword: secure.password,
+                    deviceAuthenticationPassword: secure.deviceAuthCode,
+                },
+            } : {}),
         })
+        if (secure && Object.keys(secure.groupKeys).length > 0) this.addGroupKeys(secure.groupKeys)
 
         this.client.on('connected', () => {
+            if (secure) this.checkGroupKeys()
             this.state = 'idle'
             this.conntime = Date.now()
             delete this.lastSeq   // a new tunnel starts its sequence again
@@ -143,6 +167,12 @@ class UltimateConnection extends EventEmitter {
         })
         this.client.on('error', (err) => {
             const message = (err && err.message) || String(err)
+            // synchronously: the library schedules its reconnect right after this
+            if (options.secure && SECURE_AUTH_FAILED.test(message) && this.client._options.autoReconnect) {
+                this.client._options.autoReconnect = false
+                logger.error('%s KNX Secure: %s - not retrying until the worker restarts; check the values from the ETS project',
+                    this.options.ipAddr, message)
+            }
             // a connection-level error is followed at once by a disconnect, so
             // judge it once the library has acted on it
             setImmediate(() => {
@@ -165,6 +195,52 @@ class UltimateConnection extends EventEmitter {
         // Disconnect() was called before we got here
         if (this.closing) return
         this.client.Connect()
+    }
+
+    // Data Secure group keys ({ '<ga>': base64 }) into the library's map, after
+    // each secureEnsureKeyring() - it clears the map, and without a keyring
+    // leaves it empty. Relies on knxultimate internals (pinned by the lockfile)
+    addGroupKeys(groupKeys) {
+        const client = this.client
+        this.groupKeys = groupKeys
+        if (typeof client.secureEnsureKeyring !== 'function' || typeof client.secureParseGroupAddress !== 'function') {
+            logger.error('%s KNX Secure: can\'t add %d Data Secure key(s): knxultimate no longer has the internals the shim uses - ' +
+                'Data Secure GAs won\'t decode', this.options.ipAddr, Object.keys(groupKeys).length)
+            return
+        }
+        const ensure = client.secureEnsureKeyring.bind(client)
+        client.secureEnsureKeyring = async (...args) => {
+            await ensure(...args)
+            for (const [ga, key] of Object.entries(groupKeys)) {
+                client._secureGroupKeys.set(client.secureParseGroupAddress(ga), Buffer.from(key, 'base64').subarray(0, 16))
+            }
+        }
+    }
+
+    // after the session handshake (which runs secureEnsureKeyring): are all our
+    // Data Secure keys in the map the library decrypts with? An error log, not
+    // an 'error' event - plain GAs still flow, and a restart wouldn't fix it
+    checkGroupKeys() {
+        if (!this.groupKeys) return
+        const client = this.client
+        const map = client._secureGroupKeys
+        const all = Object.entries(this.groupKeys)
+        const missing = all.filter(([ga, key]) => {
+            try {
+                const have = map instanceof Map && map.get(client.secureParseGroupAddress(ga))
+                return !(Buffer.isBuffer(have) && have.equals(Buffer.from(key, 'base64').subarray(0, 16)))
+            } catch (e) {
+                return true
+            }
+        }).map(([ga]) => ga)
+        if (missing.length > 0) {
+            logger.error('%s KNX Secure: %d of %d Data Secure key(s) not in knxultimate\'s key map (%s) - those GAs won\'t decode; ' +
+                'knxultimate internals may have changed', this.options.ipAddr, missing.length, all.length,
+                missing.slice(0, 5).join(', ') + (missing.length > 5 ? ', ...' : ''))
+        } else if (!this.groupKeysChecked) {
+            logger.info('%s KNX Secure: %d Data Secure key(s) in place', this.options.ipAddr, all.length)
+        }
+        this.groupKeysChecked = true
     }
 
     disconnected(reason) {
