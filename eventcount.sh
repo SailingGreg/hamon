@@ -20,6 +20,11 @@
 # The per-site series use their own metric value so the all-sites query above
 # never picks up a site's count.
 #
+# Count queries are range|>filter|>count() first (pushed down to storage,
+# per series) and only then grouped by location and summed; grouping before
+# count() makes influxd pull every raw point through Flux (4.8G RSS, 3.5 min
+# on prod for a full run).
+#
 # All lines of one run share one timestamp, which is also the stop of the
 # counting range, so the next 'inc' starts exactly where this run stopped.
 # That timestamp is LAG seconds in the past so points hamon writes a little
@@ -78,7 +83,7 @@ if [ "$MODE" = "full" ]; then
     isnum "$n" || continue
     total=$((total + n))
     [ -n "$loc" ] && site["$loc"]=$n
-  done < <(qloc "from(bucket:\"$BUCKET\") |> range(start:0, stop:$NOW) |> filter(fn:(r)=> $KNX) |> group(columns:[\"location\"]) |> count() |> keep(columns:[\"location\",\"_value\"])")
+  done < <(qloc "from(bucket:\"$BUCKET\") |> range(start:0, stop:$NOW) |> filter(fn:(r)=> $KNX) |> count() |> group(columns:[\"location\"]) |> sum() |> keep(columns:[\"location\",\"_value\"])")
   [ "$total" -gt 0 ] || { echo "full count failed (no rows)" >&2; exit 1; }
 else
   isnum "$prev"   || { echo "no numeric baseline (got '$prev') - run '$0 full' first" >&2; exit 1; }
@@ -95,7 +100,7 @@ else
     isnum "$n" || continue
     inc=$((inc + n))
     [ -n "$loc" ] && site["$loc"]=$(( ${site["$loc"]:-0} + n ))
-  done < <(qloc "from(bucket:\"$BUCKET\") |> range(start:$ptime, stop:$NOW) |> filter(fn:(r)=> $KNX) |> group(columns:[\"location\"]) |> count() |> keep(columns:[\"location\",\"_value\"])")
+  done < <(qloc "from(bucket:\"$BUCKET\") |> range(start:$ptime, stop:$NOW) |> filter(fn:(r)=> $KNX) |> count() |> group(columns:[\"location\"]) |> sum() |> keep(columns:[\"location\",\"_value\"])")
   total=$((prev + inc))
 fi
 
