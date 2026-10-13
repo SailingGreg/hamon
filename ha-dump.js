@@ -39,7 +39,7 @@ const argv = yargs
   })
   .option('S', {
     alias: 'secure',
-    description: 'KNX Secure tunnelling with the site\'s stored values, even before hamon.yml says secure: tunnel (a secure: tunnel site uses them anyway)',
+    description: 'KNX Secure tunnelling with the site\'s stored values, even before hamon.yml says secure: true (a secure: true site uses them anyway)',
     type: 'boolean',
   })
   .option('t', {
@@ -109,7 +109,7 @@ if (argv.stack) stack = argv.stack;
 // KNX Secure: the values hamon-upload stored for the site (.hamon-secrets.json
 // beside the config file). Listen-only, as always; no secret is printed
 var secure;
-if (site.secure === 'tunnel' || argv.secure) {
+if (site.secure === true || argv.secure) {
   if (argv.stack && argv.stack !== 'knxultimate') {
     console.log("KNX Secure needs the knxultimate stack (-s %s given)", argv.stack);
     return 1;
@@ -124,7 +124,7 @@ if (site.secure === 'tunnel' || argv.secure) {
   }
   console.log("KNX Secure tunnel %s (user %d) to gateway %s, %d Data Secure key(s)",
     secure.tunnelIA, secure.userId, secure.gateway, Object.keys(secure.groupKeys).length);
-  if (site.secure === 'tunnel' && site.enabled && tunnel === site.tunnelIA) {
+  if (site.secure === true && site.enabled && tunnel === site.tunnelIA) {
     console.log("Note: hamon uses this tunnel too - with the site connected, the gateway may refuse us or drop hamon. Use -t for another tunnel.");
   }
 }

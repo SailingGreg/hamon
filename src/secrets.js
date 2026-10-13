@@ -26,16 +26,16 @@ function siteSecure(path, name) {
     return secrets?.[name]?.secure
 }
 
-// the shim's secure options for a site with `secure: tunnel`; throws with a
+// the shim's secure options for a site with `secure: true`; throws with a
 // message saying what to fix if the stored values don't fit the site
 function secureOptions(path, location) {
     const { name, config, tunnelIA, stack } = location
     if (stack !== 'knxultimate') {
-        throw new Error(`secure: tunnel needs stack: knxultimate (site has ${stack || 'knx'})`)
+        throw new Error(`secure: true needs stack: knxultimate (site has ${stack || 'knx'})`)
     }
     const entry = siteSecure(path, name)
     if (!entry) {
-        throw new Error('secure: tunnel but no secure values stored - upload the site\'s ETS project in hamon-upload')
+        throw new Error('secure: true but no secure values stored - upload the site\'s ETS project in hamon-upload')
     }
     if (entry.configFile !== config) {
         throw new Error(`secure values are from ${entry.configFile}, site config is ${config} - re-upload the ETS project`)

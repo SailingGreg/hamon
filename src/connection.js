@@ -103,7 +103,7 @@ if (knxAddr == null) {
 // KNX Secure tunnelling: the values come from .hamon-secrets.json (see
 // secrets.js); anything missing or not matching the site throws, as above
 let secureTunnel
-if (secure === 'tunnel') {
+if (secure === true) {
     secureTunnel = secureOptions(path, workerData.location)
     logger.info('%s: KNX Secure tunnel %s (user %d) on gateway %s, %d Data Secure GA(s)', name,
         secureTunnel.tunnelIA, secureTunnel.userId, secureTunnel.gateway,
