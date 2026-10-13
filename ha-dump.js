@@ -11,7 +11,9 @@
 var dnsSync = require('dns-sync');
 const yaml = require('js-yaml');
 const fs = require('fs');
+const path = require('path');
 const yargs = require('yargs');
+const { secureOptions } = require('./src/secrets');
 
 configFile = "hamon.yml"; // default configuration file
 
@@ -35,8 +37,19 @@ const argv = yargs
     description: 'Show each telegram\'s APDU length (knx stack only): tells a 6-bit value packed into the APCI from a separate data byte',
     type: 'boolean',
   })
+  .option('S', {
+    alias: 'secure',
+    description: 'KNX Secure tunnelling with the site\'s stored values, even before hamon.yml says secure: tunnel (a secure: tunnel site uses them anyway)',
+    type: 'boolean',
+  })
+  .option('t', {
+    alias: 'tunnel',
+    description: 'Secure: the tunnel to use (default: the site\'s tunnelIA). A secure tunnel takes one client, so pick another while hamon is connected',
+    type: 'string',
+    nargs: 1,
+  })
   .scriptName("ha-dump")
-  .usage("Usage: $0 [-c config-file] [-s knx|knxultimate] [-l] location")
+  .usage("Usage: $0 [-c config-file] [-s knx|knxultimate] [-l] [-S] [-t tunnel-ia] location")
   .argv;
 
 if (argv.config) {
@@ -67,6 +80,7 @@ const doc = yaml.load(fs.readFileSync(configFile, 'utf8'));
 var cnt = 0;
 var knxnetLoc = "";
 var stack;
+var site = {};
 for (deploy in doc["locations"]) {
   cnt = cnt + 1;
   install = doc["locations"][deploy]
@@ -79,6 +93,7 @@ for (deploy in doc["locations"]) {
     logging = install['logging'];
     phyAddr = install['phyAddr'];
     stack = install['stack'];
+    site = install;
   }
 }
 
@@ -90,6 +105,29 @@ if (knxnetLoc == "") {
 console.log("Dumping %s %s %d (%s)", knxnetLoc, knxnetIP, knxnetPort, knxnetXML);
 // command line beats the location's stack
 if (argv.stack) stack = argv.stack;
+
+// KNX Secure: the values hamon-upload stored for the site (.hamon-secrets.json
+// beside the config file). Listen-only, as always; no secret is printed
+var secure;
+if (site.secure === 'tunnel' || argv.secure) {
+  if (argv.stack && argv.stack !== 'knxultimate') {
+    console.log("KNX Secure needs the knxultimate stack (-s %s given)", argv.stack);
+    return 1;
+  }
+  stack = 'knxultimate';
+  const tunnel = argv.tunnel || site.tunnelIA;
+  try {
+    secure = secureOptions(path.dirname(path.resolve(configFile)) + '/', { ...site, stack, tunnelIA: tunnel });
+  } catch (err) {
+    console.log("KNX Secure: %s", err.message);
+    return 1;
+  }
+  console.log("KNX Secure tunnel %s (user %d) to gateway %s, %d Data Secure key(s)",
+    secure.tunnelIA, secure.userId, secure.gateway, Object.keys(secure.groupKeys).length);
+  if (site.secure === 'tunnel' && site.enabled && tunnel === site.tunnelIA) {
+    console.log("Note: hamon uses this tunnel too - with the site connected, the gateway may refuse us or drop hamon. Use -t for another tunnel.");
+  }
+}
 var knx = require('./src/knxstack')(stack);
 console.log("Stack: %s", stack || 'knx');
 // resolve the KNXnet/IP router
@@ -106,6 +144,7 @@ var connection = knx.Connection({
   // ensure it tunneling and not operating n hybrid mode
   forceTunneling: true,
   physAddr: phyAddr, // from config
+  secure: secure,    // knxultimate only; undefined = plain
   loglevel: logging,
   handlers: {
     connected: function () {
