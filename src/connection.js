@@ -150,6 +150,9 @@ loadmapping(path); // initialise
 //const mapper = new strtodpt.strtodpt(path);
 //const mapper = new strdpt.strtodpt(path);
 
+// default subtype for an ETS DPT given as the main type only (see below)
+const DEFAULT_SUBTYPE = { DPT1: '.001', DPT3: '.007', DPT5: '.001', DPT7: '.001', DPT8: '.001', DPT9: '.001', DPT18: '.001' }
+
 let last_err = new Date().getTime(); // time
 let ld = 0;
 let inited = false
@@ -216,13 +219,12 @@ const connection = knx.Connection({
 
 
             //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
-              // add default subtype if not defined
-            if (groupAddresses[key].dpt == "DPT1")
-                groupAddresses[key].dpt = groupAddresses[key].dpt + ".001"
-            if (groupAddresses[key].dpt == "DPT5")
-                groupAddresses[key].dpt = groupAddresses[key].dpt + ".001"
-            if (groupAddresses[key].dpt == "DPT9")
-                groupAddresses[key].dpt = groupAddresses[key].dpt + ".001"
+              // add a default subtype where ETS gave only the main type:
+              // without one knx's dptlib gives no type name and the GA is never
+              // stored. 3.007 (dimming) is the usual bare DPT3; DPT3 and DPT18
+              // decode to objects, so they reach dbv2's composite (DBSKIP) path
+            if (DEFAULT_SUBTYPE[groupAddresses[key].dpt] !== undefined)
+                groupAddresses[key].dpt += DEFAULT_SUBTYPE[groupAddresses[key].dpt]
             // construct dp for the group address
             // note still doing this for undefined DPTs
             let dp = new knx.Datapoint(
