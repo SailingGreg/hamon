@@ -50,6 +50,23 @@ const WIND_DIR_DEG = {
   "north-westerly": 315
 }
 
+// Survey (per site, `survey: true` in hamon.yml): which GAs send values the
+// float `value` field cannot hold (genuine text, objects). Each worker is one
+// site, so key on GA + DPT; log the first occurrence, then every 100th with a
+// running count, to keep volume low.
+const survey = require('worker_threads').workerData?.location?.survey === true
+const skipped = new Map()
+function logSkipped(knxloc, dest, name, type, value) {
+  if (!survey) return
+  const key = `${dest}|${type}`
+  const n = (skipped.get(key) || 0) + 1
+  skipped.set(key, n)
+  if (n != 1 && n % 100 != 0) return
+  const kind = typeof(value) == "number" ? "non-finite" : typeof(value)
+  const shown = JSON.stringify(value)
+  logger.info(`DBSKIP ${knxloc} ${dest} (${name}) ${type} ${kind} count=${n} value=${shown === undefined ? String(value) : shown.slice(0, 80)}`)
+}
+
 // write to influxDB
 function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit) {
   if (evt != 'GroupValue_Write' && evt != 'GroupValue_Response') return;
@@ -102,7 +119,7 @@ function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit) {
     // anything else (unconverted strings, objects, NaN) would be rejected by
     // InfluxDB, so skip the write rather than emit a 422
     if (typeof(dbvalue) != "number" || !Number.isFinite(dbvalue)) {
-        //logger.info("dbvalue %s %s %j %s", src, dest, dbvalue, typeof(dbvalue));
+        logSkipped(knxloc, dest, name, type, dbvalue);
         return;
     }
 

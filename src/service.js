@@ -152,6 +152,7 @@ function compareLoc(oldLoc, newLoc) {
     if (oldLoc['stack'] != newLoc['stack']) change = true;
     if (oldLoc['secure'] != newLoc['secure']) change = true;
     if (oldLoc['tunnelIA'] != newLoc['tunnelIA']) change = true;
+    if (oldLoc['survey'] != newLoc['survey']) change = true;
 
     return change; // return flag
 }
