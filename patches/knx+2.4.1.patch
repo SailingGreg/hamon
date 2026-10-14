@@ -52,6 +52,25 @@ index 73ac9ff..2411182 100644
        },
        _onExit() {
          clearTimeout(this.connstatetimer);
+diff --git a/node_modules/knx/src/dptlib/dpt14.js b/node_modules/knx/src/dptlib/dpt14.js
+index 6a3b596..b7186c6 100644
+--- a/node_modules/knx/src/dptlib/dpt14.js
++++ b/node_modules/knx/src/dptlib/dpt14.js
+@@ -115,6 +115,14 @@ exports.subtypes = {
+     unit: 'W',
+   },
+ 
++  // --- hamon patch 2026-10-14: 14.057 power factor (cos phi) ---
++  // Without the subtype hamon got no type name and silently didn't store it.
++  '057': {
++    name: 'DPT_Value_Power_Factor',
++    desc: 'power factor',
++    unit: '',
++  },
++
+   '065': {
+     name: 'DPT_Value_Speed',
+     desc: 'speed',
 diff --git a/node_modules/knx/src/dptlib/dpt20.js b/node_modules/knx/src/dptlib/dpt20.js
 index cb239ca..d6b78ee 100644
 --- a/node_modules/knx/src/dptlib/dpt20.js
@@ -85,3 +104,40 @@ index cb239ca..d6b78ee 100644
 +    range: [,],
 +  },
  };
+diff --git a/node_modules/knx/src/dptlib/dpt238.js b/node_modules/knx/src/dptlib/dpt238.js
+index 7bf2c93..5dc9f3e 100644
+--- a/node_modules/knx/src/dptlib/dpt238.js
++++ b/node_modules/knx/src/dptlib/dpt238.js
+@@ -71,4 +71,16 @@ exports.subtypes = {
+     desc: 'counter pulses',
+     unit: 'pulses',
+   },
++
++  // --- hamon patch 2026-10-14: 238.600 DALI control gear diagnostic ---
++  // Without the subtype hamon got no type name and silently didn't store it.
++  // Stored as the raw byte: bits 0-5 DALI address, bit 6 lamp failure,
++  // bit 7 ballast failure.
++  '600': {
++    name: 'DPT_DALI_Control_Gear_Diagnostic',
++    desc: 'DALI control gear diagnostic',
++    unit: '',
++    scalar_range: [,],
++    range: [,],
++  },
+ };
+diff --git a/node_modules/knx/src/dptlib/dpt5.js b/node_modules/knx/src/dptlib/dpt5.js
+index 9ed990c..4a7eccd 100644
+--- a/node_modules/knx/src/dptlib/dpt5.js
++++ b/node_modules/knx/src/dptlib/dpt5.js
+@@ -51,4 +51,11 @@ exports.subtypes = {
+         "name" : "DPT_Value_1_Ucount", "desc" : "counter pulses",
+         "unit" : "pulses",
+     },
++
++    // --- hamon patch 2026-10-14: 5.100 fan stage (0..255) ---
++    // Without the subtype hamon got no type name and silently didn't store it.
++    "100" : {
++        "name" : "DPT_FanStage", "desc" : "fan stage",
++        "unit" : "",
++    },
+ }
