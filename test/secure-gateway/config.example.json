@@ -1,0 +1,20 @@
+{
+  "listen": "127.0.0.1",
+  "port": 3671,
+  "serial": "00fa00000001",
+  "device_authentication_code": "trustme",
+  "users": {
+    "2": { "password": "secret", "tunnel": "1.1.10" },
+    "3": { "password": "secret3", "tunnel": "1.1.11" }
+  },
+  "group_keys": {
+    "1/2/3": "AAECAwQFBgcICQoLDA0ODw==",
+    "1/2/4": "8ODQwLCgkIBwYFBAMCAQAA=="
+  },
+  "interval": 2,
+  "telegrams": [
+    { "ga": "1/2/3", "bits": 1, "src": "1.1.20" },
+    { "ga": "1/2/4", "bytes": "0c1a", "src": "1.1.20" },
+    { "ga": "1/2/5", "bits": 0, "src": "1.1.21" }
+  ]
+}
