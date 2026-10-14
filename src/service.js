@@ -84,7 +84,7 @@ process.on('SIGHUP', sigHandler);
 let originalDoc = {};
 let orgPath = "";
 
-function start_worker(path, influxver, loc, survey) {
+function start_worker(path, influxver, loc, survey, decoder) {
 
     loc["path"] = path; // add path
     loc["influxver"] = influxver; // add influxdb version
@@ -102,7 +102,8 @@ function start_worker(path, influxver, loc, survey) {
     const worker = new Worker(path + './src/connection.js', {
                                     workerData: { location: loc, connectedBefore: everConnected.has(loc.name),
                                                   failures: failures[loc.name] || 0,
-                                                  survey: survey === true } // top-level `survey: true` in hamon.yml
+                                                  survey: survey === true, // top-level `survey: true` in hamon.yml
+                                                  decoder: decoder } // top-level `decoder: knx|knxultimate` (absent = knx)
     })
     threads.add(worker)
 
@@ -198,7 +199,7 @@ function restart (name) {
     logger.info(`Restarting: ${loc.name} - ${name}`)
 
     // and start it
-    let wrk = start_worker(orgPath, originalDoc.influxdb, loc, originalDoc.survey);
+    let wrk = start_worker(orgPath, originalDoc.influxdb, loc, originalDoc.survey, originalDoc.decoder);
     loc["worker"] = wrk; // and recorded the 'worker'
 
 }
@@ -259,7 +260,7 @@ async function ConnectionService(firstrun, path, doc) {
                 }
 
                 if (loc["enabled"] == true) { // restart
-                    wrk = start_worker(path, doc.influxdb, loc, doc.survey);
+                    wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.decoder);
                     loc["worker"] = wrk;
                     //doc.locations[location]["worker"] = wrk;
                 } else {
@@ -276,7 +277,7 @@ async function ConnectionService(firstrun, path, doc) {
             //start it
             if (loc["enabled"] == true) { // only if enabled
                 logger.info(`New entry for: ${loc.name}`)
-                wrk = start_worker(path, doc.influxdb, loc, doc.survey);
+                wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.decoder);
                 loc["worker"] = wrk;
                 //doc.locations[location]["worker"] = wrk;
             }
@@ -287,7 +288,7 @@ async function ConnectionService(firstrun, path, doc) {
         if (loc["enabled"] == true) { // only if enabled
             logger.info(`First run for: ${loc.name}`)
             // start worker
-            wrk = start_worker(path, doc.influxdb, loc, doc.survey);
+            wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.decoder);
             loc["worker"] = wrk;
             //doc.locations[location]["worker"] = wrk;
         }

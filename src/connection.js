@@ -50,6 +50,11 @@ for (const stream of [process.stdout, process.stderr]) {
 // knx (default) or knxultimate - same API either way, see knxstack.js
 const knx = require('./knxstack')(stack)
 
+// decoder (top-level `decoder:` in hamon.yml, read at ha-mon start): knx
+// (default) decodes/encodes with knx.Datapoint; knxultimate with datapoint.js
+const decoder = workerData?.decoder === 'knxultimate' ? 'knxultimate' : 'knx'
+const Datapoint = decoder === 'knxultimate' ? require('./datapoint').Datapoint : knx.Datapoint
+
 // exit if signaled
 parentPort.on("message", (value) => {
 	if (value.exit) {
@@ -119,7 +124,7 @@ const quietRetries = workerData?.connectedBefore !== true && (workerData?.failur
 
 const knxAddr = dnsSync.resolve(dns)
 
-logger.info('KNXnet/IP %s -> %s (stack %s)', dns, knxAddr, stack || 'knx')
+logger.info('KNXnet/IP %s -> %s (stack %s, decoder %s)', dns, knxAddr, stack || 'knx', decoder)
 
 // unresolved: knx would silently fall back to the multicast default and look
 // 'connected' with no data - so fail; service.js logs it and retries with
@@ -248,7 +253,7 @@ const connection = knx.Connection({
                 groupAddresses[key].dpt += DEFAULT_SUBTYPE[groupAddresses[key].dpt]
             // construct dp for the group address
             // note still doing this for undefined DPTs
-            let dp = new knx.Datapoint(
+            let dp = new Datapoint(
               { ga: key, dpt: groupAddresses[key].dpt }, connection
             )
               //if (groupAddresses[key].dpt == "DPT1.001")

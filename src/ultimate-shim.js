@@ -8,7 +8,7 @@
  *                secure, handlers: { connected, event, error } })
  *   .state            'idle' while connected (what connection.js tests for)
  *   .conntime         set while connected (knx.Datapoint autoread checks it)
- *   .write(ga, value, dptid, cb) / .read(ga, cb) / .Disconnect()
+ *   .write(ga, value, dptid, cb) / .writeRaw(ga, buf, bitlength, cb) / .read(ga, cb) / .Disconnect()
  *   events            connected, disconnected, error, and for each telegram the
  *                     same four the knx FSM emits, in the same order:
  *                     event_<dest>, <evt>_<dest>, <evt>, event
@@ -276,6 +276,17 @@ class UltimateConnection extends EventEmitter {
             const apdu = {}
             DPTLib.populateAPDU(value, apdu, dptid)   // knx's encoding, not knxultimate's
             this.client.writeRaw(grpaddr, apdu.data, apdu.bitlength)
+        } catch (err) {
+            return this.dropped('write', grpaddr, err)
+        }
+        if (typeof callback === 'function') setImmediate(callback)
+    }
+
+    // an already-encoded payload (decoder: knxultimate, see datapoint.js)
+    writeRaw(grpaddr, buf, bitlength, callback) {
+        if (grpaddr == null || !Buffer.isBuffer(buf) || !this.client) return
+        try {
+            this.client.writeRaw(grpaddr, buf, bitlength)
         } catch (err) {
             return this.dropped('write', grpaddr, err)
         }
