@@ -1,5 +1,5 @@
 /*
- * coerce.js - turn an MQTT payload (a string) into the value a group address's
+ * payload.js - turn an MQTT payload (a string) into the value a group address's
  * DPT expects, for mqwrite.js. Kept apart from mqwrite so it can be tested
  * without the MQTT and InfluxDB modules.
  */
@@ -10,7 +10,7 @@ const { dptMain, OBJECT_DPTS } = require('./dptnames')
 // unconditional parseInt(), which turned floats (21.5 -> 21), strings and
 // booleans (e.g. "On" -> NaN) into bad values and broke the write.
 // NaN means "don't send": mqwrite refuses it.
-function coerceForDpt (dpt, raw) {
+function parsePayload (dpt, raw) {
   const s = String(raw).trim()
   const main = dptMain(dpt)
   // a GA with no DPT would be written as DPT1, and knx inverts numeric 1/0
@@ -52,4 +52,4 @@ function compositeValue (main, s) {
   return NaN
 }
 
-module.exports = { coerceForDpt }
+module.exports = { parsePayload }

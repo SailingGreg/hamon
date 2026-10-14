@@ -2,7 +2,7 @@ const mqtt = require('mqtt') // added to package.jso
 const logger = require('./logger')
 const { writeActions } = require('./db')
 const { writeActionsv2 } = require('./dbv2')
-const { coerceForDpt } = require('./coerce')
+const { parsePayload } = require('./payload')
 const { writeError } = require('./dptrange')
 const { dptMain } = require('./dptnames')
 
@@ -38,8 +38,8 @@ function MQTTconnect(groupAddresses, connection, location) {
 
       if (groupAddresses.hasOwnProperty(gad)) {
 
-        // convert the raw payload to the JS type this GAD's DPT expects
-        let value = coerceForDpt(groupAddresses[gad].dpt, msg)
+        // parse the payload into the value this GAD's DPT expects
+        let value = parsePayload(groupAddresses[gad].dpt, msg)
 
         // log the action - loc, type, target and 'value'. The influx
         // 'actions.value' field is a float, so only numbers go in (booleans and
@@ -121,4 +121,4 @@ function mqdisconnect () {
 //module.exports.MQTTconnect = MQTTconnect
 exports.MQTTconnect = MQTTconnect
 exports.mqdisconnect = mqdisconnect
-exports.coerceForDpt = coerceForDpt
+exports.parsePayload = parsePayload

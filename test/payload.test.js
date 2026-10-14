@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 /*
- * coerce.test.js - MQTT payload -> coerceForDpt -> Datapoint.write -> bytes,
+ * payload.test.js - MQTT payload -> parsePayload -> Datapoint.write -> bytes,
  * for both decoders (knx.Datapoint and src/datapoint.js).
  *
- *   node test/coerce.test.js
+ *   node test/payload.test.js
  *
  * Each case either sends the expected bytes with both decoders, or is
- * refused (coerceForDpt gives NaN, or write() throws) - never a wrong value.
+ * refused (parsePayload gives NaN, or write() throws) - never a wrong value.
  */
 const assert = require('assert')
 const { EventEmitter } = require('events')
 { const l = require('log-driver').logger; l.levels.forEach((v) => { l[v] = () => {} }) }
 const knx = require('knx')
 const { Datapoint } = require('../src/datapoint')
-const { coerceForDpt } = require('../src/coerce')
+const { parsePayload } = require('../src/payload')
 const { writeError } = require('../src/dptrange')
 
 class FakeConn extends EventEmitter {
@@ -30,7 +30,7 @@ class FakeConn extends EventEmitter {
 
 // what goes on the bus: hex, or 'refused'
 function send (Impl, dpt, payload) {
-    const value = coerceForDpt(dpt, payload)
+    const value = parsePayload(dpt, payload)
     if (typeof value === 'number' && Number.isNaN(value)) return 'refused'
     if (writeError(dpt, value)) return 'refused'   // as mqwrite
     const c = new FakeConn()
@@ -66,4 +66,4 @@ for (const [dpt, payload, want] of CASES) {
     assert.strictEqual(b, want, `knxultimate: ${dpt} ${JSON.stringify(payload)} sent ${b}, want ${want}`)
     n++
 }
-console.log(`coerce: ${n} payloads send the same bytes (or are refused) with both decoders`)
+console.log(`payload: ${n} payloads send the same bytes (or are refused) with both decoders`)
