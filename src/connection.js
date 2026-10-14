@@ -112,6 +112,9 @@ if (workerData?.connectedBefore !== true) {
         handleTimeout();
     }, FIRST_CONNECT_WAIT);
 }
+// once such a site has given up, its restarts keep the stack quiet - otherwise
+// it logs 'connection timed out, retrying...' every few seconds each time
+const quietRetries = workerData?.connectedBefore !== true && (workerData?.failures || 0) > 0
 
 const knxAddr = dnsSync.resolve(dns)
 
@@ -180,7 +183,7 @@ const connection = knx.Connection({
   suppress_ack_ldatareq: (device == "loxone" || device == "eibport") ? true : false,
   physAddr: phyAddr,
   secure: secureTunnel,   // knxultimate only; undefined = plain tunnelling
-  loglevel: logging,
+  loglevel: quietRetries ? 'error' : logging,
   handlers: {
     connected: function () {
         ld = new Date().getTime(); // time

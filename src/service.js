@@ -100,7 +100,8 @@ function start_worker(path, influxver, loc) {
     // a site that hasn't connected since hamon started gives up after a few
     // minutes and goes into the restart back-off (see connection.js)
     const worker = new Worker(path + './src/connection.js', {
-                                    workerData: { location: loc, connectedBefore: everConnected.has(loc.name) }
+                                    workerData: { location: loc, connectedBefore: everConnected.has(loc.name),
+                                                  failures: failures[loc.name] || 0 }
     })
     threads.add(worker)
 
