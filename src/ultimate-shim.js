@@ -53,7 +53,8 @@ const logger = require('./logger')
 const LOGLEVEL = { error: 'error', warn: 'warn', info: 'warn', debug: 'debug', trace: 'trace' }
 
 // knxultimate's messages for a secure session the gateway or we refused
-const SECURE_AUTH_FAILED = /authentication failed|MAC verification failed|session rejected/i
+// 6.0.x says 'session rejected', 6.2+ 'rejected the session' (SESSION_STATUS 2)
+const SECURE_AUTH_FAILED = /authentication failed|MAC verification failed|session rejected|rejected the session/i
 
 class UltimateConnection extends EventEmitter {
     constructor(options) {
@@ -143,10 +144,12 @@ class UltimateConnection extends EventEmitter {
                     tunnelUserId: secure.userId,
                     tunnelUserPassword: secure.password,
                     deviceAuthenticationPassword: secure.deviceAuthCode,
+                    // Data Secure keys without a keyring (knxultimate 6.2+)
+                    ...(Object.keys(secure.groupKeys).length > 0 ? { groupKeys: this.groupKeyBuffers(secure.groupKeys) } : {}),
                 },
             } : {}),
         })
-        if (secure && Object.keys(secure.groupKeys).length > 0) this.addGroupKeys(secure.groupKeys)
+        if (secure && Object.keys(secure.groupKeys).length > 0) this.groupKeys = secure.groupKeys
 
         this.client.on('connected', () => {
             if (secure) this.checkGroupKeys()
@@ -197,24 +200,11 @@ class UltimateConnection extends EventEmitter {
         this.client.Connect()
     }
 
-    // Data Secure group keys ({ '<ga>': base64 }) into the library's map, after
-    // each secureEnsureKeyring() - it clears the map, and without a keyring
-    // leaves it empty. Relies on knxultimate internals (pinned by the lockfile)
-    addGroupKeys(groupKeys) {
-        const client = this.client
-        this.groupKeys = groupKeys
-        if (typeof client.secureEnsureKeyring !== 'function' || typeof client.secureParseGroupAddress !== 'function') {
-            logger.error('%s KNX Secure: can\'t add %d Data Secure key(s): knxultimate no longer has the internals the shim uses - ' +
-                'Data Secure GAs won\'t decode', this.options.ipAddr, Object.keys(groupKeys).length)
-            return
-        }
-        const ensure = client.secureEnsureKeyring.bind(client)
-        client.secureEnsureKeyring = async (...args) => {
-            await ensure(...args)
-            for (const [ga, key] of Object.entries(groupKeys)) {
-                client._secureGroupKeys.set(client.secureParseGroupAddress(ga), Buffer.from(key, 'base64').subarray(0, 16))
-            }
-        }
+    // Data Secure group keys ({ '<ga>': base64 }) as the 16-byte Buffers
+    // secureTunnelConfig.groupKeys takes
+    groupKeyBuffers(groupKeys) {
+        return Object.fromEntries(Object.entries(groupKeys).map(([ga, key]) =>
+            [ga, Buffer.from(key, 'base64').subarray(0, 16)]))
     }
 
     // after the session handshake (which runs secureEnsureKeyring): are all our
