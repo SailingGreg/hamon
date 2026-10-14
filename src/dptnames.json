@@ -1,0 +1,558 @@
+{
+ "1.001": {
+  "name": "DPT_Switch",
+  "unit": ""
+ },
+ "1.002": {
+  "name": "DPT_Bool",
+  "unit": ""
+ },
+ "1.003": {
+  "name": "DPT_Enable",
+  "unit": ""
+ },
+ "1.004": {
+  "name": "DPT_Ramp",
+  "unit": ""
+ },
+ "1.005": {
+  "name": "DPT_Alarm",
+  "unit": ""
+ },
+ "1.006": {
+  "name": "DPT_BinaryValue",
+  "unit": ""
+ },
+ "1.007": {
+  "name": "DPT_Step",
+  "unit": ""
+ },
+ "1.008": {
+  "name": "DPT_UpDown",
+  "unit": ""
+ },
+ "1.009": {
+  "name": "DPT_OpenClose",
+  "unit": ""
+ },
+ "1.010": {
+  "name": "DPT_Start",
+  "unit": ""
+ },
+ "1.011": {
+  "name": "DPT_State",
+  "unit": ""
+ },
+ "1.012": {
+  "name": "DPT_Invert",
+  "unit": ""
+ },
+ "1.013": {
+  "name": "DPT_DimSendStyle",
+  "unit": ""
+ },
+ "1.014": {
+  "name": "DPT_InputSource",
+  "unit": ""
+ },
+ "1.015": {
+  "name": "DPT_Reset",
+  "unit": ""
+ },
+ "1.016": {
+  "name": "DPT_Ack",
+  "unit": ""
+ },
+ "1.017": {
+  "name": "DPT_Trigger",
+  "unit": ""
+ },
+ "1.018": {
+  "name": "DPT_Occupancy",
+  "unit": ""
+ },
+ "1.019": {
+  "name": "DPT_WindowDoor",
+  "unit": ""
+ },
+ "1.021": {
+  "name": "DPT_LogicalFunction",
+  "unit": ""
+ },
+ "1.022": {
+  "name": "DPT_Scene_AB",
+  "unit": ""
+ },
+ "1.023": {
+  "name": "DPT_ShutterBlinds_Mode",
+  "unit": ""
+ },
+ "1.100": {
+  "name": "DPT_Heat/Cool",
+  "unit": ""
+ },
+ "2.001": {
+  "name": "DPT_Switch_Control",
+  "unit": ""
+ },
+ "2.002": {
+  "name": "DPT_Bool_Control",
+  "unit": ""
+ },
+ "2.003": {
+  "name": "DPT_Emable_Control",
+  "unit": ""
+ },
+ "2.004": {
+  "name": "DPT_Ramp_Control",
+  "unit": ""
+ },
+ "2.005": {
+  "name": "DPT_Alarm_Control",
+  "unit": ""
+ },
+ "2.006": {
+  "name": "DPT_BinaryValue_Control",
+  "unit": ""
+ },
+ "2.007": {
+  "name": "DPT_Step_Control",
+  "unit": ""
+ },
+ "2.008": {
+  "name": "DPT_Direction1_Control",
+  "unit": ""
+ },
+ "2.009": {
+  "name": "DPT_Direction2_Control",
+  "unit": ""
+ },
+ "3.007": {
+  "name": "DPT_Control_Dimming",
+  "unit": ""
+ },
+ "3.008": {
+  "name": "DPT_Control_Blinds",
+  "unit": ""
+ },
+ "4.001": {
+  "name": "DPT_Char_ASCII",
+  "unit": ""
+ },
+ "4.002": {
+  "name": "DPT_Char_8859_1",
+  "unit": ""
+ },
+ "5.001": {
+  "name": "DPT_Scaling",
+  "unit": "%"
+ },
+ "5.003": {
+  "name": "DPT_Angle",
+  "unit": "°"
+ },
+ "5.004": {
+  "name": "DPT_Percent_U8",
+  "unit": "%"
+ },
+ "5.005": {
+  "name": "DPT_DecimalFactor",
+  "unit": "ratio"
+ },
+ "5.006": {
+  "name": "DPT_Tariff",
+  "unit": "tariff"
+ },
+ "5.010": {
+  "name": "DPT_Value_1_Ucount",
+  "unit": "pulses"
+ },
+ "5.100": {
+  "name": "DPT_FanStage",
+  "unit": ""
+ },
+ "6.001": {
+  "name": "DPT_Switch",
+  "unit": "%"
+ },
+ "6.010": {
+  "name": "DPT_Bool",
+  "unit": "pulses"
+ },
+ "7.001": {
+  "name": "DPT_Value_2_Ucount",
+  "unit": "pulses"
+ },
+ "7.002": {
+  "name": "DPT_TimePeriodMsec",
+  "unit": "milliseconds"
+ },
+ "7.003": {
+  "name": "DPT_TimePeriod10Msec",
+  "unit": "centiseconds"
+ },
+ "7.004": {
+  "name": "DPT_TimePeriod100Msec",
+  "unit": "deciseconds"
+ },
+ "7.005": {
+  "name": "DPT_TimePeriodSec",
+  "unit": "seconds"
+ },
+ "7.006": {
+  "name": "DPT_TimePeriodMin",
+  "unit": "minutes"
+ },
+ "7.007": {
+  "name": "DPT_TimePeriodHrs",
+  "unit": "hours"
+ },
+ "7.010": {
+  "name": "DPT_PropDataType",
+  "unit": ""
+ },
+ "7.011": {
+  "name": "DPT_Length_mm",
+  "unit": "mm"
+ },
+ "7.012": {
+  "name": "DPT_UEICurrentmA",
+  "unit": "mA"
+ },
+ "7.013": {
+  "name": "DPT_Brightness",
+  "unit": "lux"
+ },
+ "8.001": {
+  "name": "DPT_Value_2_Count",
+  "unit": "pulses"
+ },
+ "8.002": {
+  "name": "DPT_DeltaTimeMsec",
+  "unit": "milliseconds"
+ },
+ "8.003": {
+  "name": "DPT_DeltaTime10Msec",
+  "unit": "centiseconds"
+ },
+ "8.004": {
+  "name": "DPT_DeltaTime100Msec",
+  "unit": "deciseconds"
+ },
+ "8.005": {
+  "name": "DPT_DeltaTimeSec",
+  "unit": "seconds"
+ },
+ "8.006": {
+  "name": "DPT_DeltaTimeMin",
+  "unit": "minutes"
+ },
+ "8.007": {
+  "name": "DPT_DeltaTimeHrs",
+  "unit": "hours"
+ },
+ "8.010": {
+  "name": "DPT_Percent_V16",
+  "unit": "%"
+ },
+ "8.011": {
+  "name": "DPT_RotationAngle",
+  "unit": "°"
+ },
+ "9.001": {
+  "name": "DPT_Value_Temp",
+  "unit": "°C"
+ },
+ "9.002": {
+  "name": "DPT_Value_Tempd",
+  "unit": "°C"
+ },
+ "9.003": {
+  "name": "DPT_Value_Tempa",
+  "unit": "°K/h"
+ },
+ "9.004": {
+  "name": "DPT_Value_Lux",
+  "unit": "lux"
+ },
+ "9.005": {
+  "name": "DPT_Value_Wsp",
+  "unit": "m/s"
+ },
+ "9.006": {
+  "name": "DPT_Value_Pres",
+  "unit": "Pa"
+ },
+ "9.007": {
+  "name": "DPT_Value_Humidity",
+  "unit": "%"
+ },
+ "9.008": {
+  "name": "DPT_Value_AirQuality",
+  "unit": "ppm"
+ },
+ "9.010": {
+  "name": "DPT_Value_Time1",
+  "unit": "s"
+ },
+ "9.011": {
+  "name": "DPT_Value_Time2",
+  "unit": "ms"
+ },
+ "9.020": {
+  "name": "DPT_Value_Volt",
+  "unit": "mV"
+ },
+ "9.021": {
+  "name": "DPT_Value_Curr",
+  "unit": "mA"
+ },
+ "9.022": {
+  "name": "DPT_PowerDensity",
+  "unit": "W/m²"
+ },
+ "9.023": {
+  "name": "DPT_KelvinPerPercent",
+  "unit": "K/%"
+ },
+ "9.024": {
+  "name": "DPT_Power",
+  "unit": "kW"
+ },
+ "9.025": {
+  "name": "DPT_Value_Volume_Flow",
+  "unit": "l/h"
+ },
+ "9.026": {
+  "name": "DPT_Rain_Amount",
+  "unit": "l/m²"
+ },
+ "9.027": {
+  "name": "DPT_Value_Temp_F",
+  "unit": "°F"
+ },
+ "9.028": {
+  "name": "DPT_Value_Wsp_kmh",
+  "unit": "km/h"
+ },
+ "10.001": {
+  "name": "DPT_TimeOfDay",
+  "unit": ""
+ },
+ "11.001": {
+  "name": "DPT_Date",
+  "unit": ""
+ },
+ "12.001": {
+  "name": "DPT_Value_4_Ucount",
+  "unit": ""
+ },
+ "13.001": {
+  "name": "DPT_Value_4_Count",
+  "unit": "pulses"
+ },
+ "13.002": {
+  "name": "DPT_Value_Activation_Energy",
+  "unit": "J/mol"
+ },
+ "13.010": {
+  "name": "DPT_ActiveEnergy",
+  "unit": "Wh"
+ },
+ "13.011": {
+  "name": "DPT_ApparantEnergy",
+  "unit": "VAh"
+ },
+ "13.012": {
+  "name": "DPT_ReactiveEnergy",
+  "unit": "VARh"
+ },
+ "13.013": {
+  "name": "DPT_ActiveEnergy_kWh",
+  "unit": "kWh"
+ },
+ "13.014": {
+  "name": "DPT_ApparantEnergy_kVAh",
+  "unit": "VAh"
+ },
+ "13.015": {
+  "name": "DPT_ReactiveEnergy_kVARh",
+  "unit": "kVARh"
+ },
+ "13.100": {
+  "name": "DPT_LongDeltaTimeSec",
+  "unit": "s"
+ },
+ "14.007": {
+  "name": "DPT_Value_AngleDeg°",
+  "unit": "°"
+ },
+ "14.019": {
+  "name": "DPT_Value_Electric_Current",
+  "unit": "A"
+ },
+ "14.027": {
+  "name": "DPT_Value_Electric_Potential",
+  "unit": "V"
+ },
+ "14.028": {
+  "name": "DPT_Value_Electric_PotentialDifference",
+  "unit": "V"
+ },
+ "14.031": {
+  "name": "DPT_Value_Energ",
+  "unit": "J"
+ },
+ "14.032": {
+  "name": "DPT_Value_Force",
+  "unit": "N"
+ },
+ "14.033": {
+  "name": "DPT_Value_Frequency",
+  "unit": "Hz"
+ },
+ "14.036": {
+  "name": "DPT_Value_Heat_FlowRate",
+  "unit": "W"
+ },
+ "14.037": {
+  "name": "DPT_Value_Heat_Quantity",
+  "unit": "J"
+ },
+ "14.038": {
+  "name": "DPT_Value_Impedance",
+  "unit": "Ω"
+ },
+ "14.039": {
+  "name": "DPT_Value_Length",
+  "unit": "m"
+ },
+ "14.051": {
+  "name": "DPT_Value_Mass",
+  "unit": "kg"
+ },
+ "14.056": {
+  "name": "DPT_Value_Power",
+  "unit": "W"
+ },
+ "14.057": {
+  "name": "DPT_Value_Power_Factor",
+  "unit": ""
+ },
+ "14.065": {
+  "name": "DPT_Value_Speed",
+  "unit": "m/s"
+ },
+ "14.066": {
+  "name": "DPT_Value_Stress",
+  "unit": "Pa"
+ },
+ "14.067": {
+  "name": "DPT_Value_Surface_Tension",
+  "unit": "1/Nm"
+ },
+ "14.068": {
+  "name": "DPT_Value_Common_Temperature",
+  "unit": "°C"
+ },
+ "14.069": {
+  "name": "DPT_Value_Absolute_Temperature",
+  "unit": "K"
+ },
+ "14.070": {
+  "name": "DPT_Value_TemperatureDifference",
+  "unit": "K"
+ },
+ "14.078": {
+  "name": "DPT_Value_Weight",
+  "unit": "N"
+ },
+ "14.079": {
+  "name": "DPT_Value_Work",
+  "unit": "J"
+ },
+ "15.000": {
+  "name": "DPT_Access_Data",
+  "unit": ""
+ },
+ "16.000": {
+  "name": "DPT_String_ASCII",
+  "unit": ""
+ },
+ "16.001": {
+  "name": "DPT_String_8859_1",
+  "unit": ""
+ },
+ "17.001": {
+  "name": "DPT_SceneNumber",
+  "unit": ""
+ },
+ "18.001": {
+  "name": "DPT_SceneControl",
+  "unit": ""
+ },
+ "19.001": {
+  "name": "DPT_DateTime",
+  "unit": ""
+ },
+ "20.007": {
+  "name": "DPT_AlarmClassType",
+  "unit": ""
+ },
+ "20.102": {
+  "name": "HVAC_Mode",
+  "unit": ""
+ },
+ "20.105": {
+  "name": "DPT_HVACContrMode",
+  "unit": ""
+ },
+ "20.107": {
+  "name": "DPT_ChangeoverMode",
+  "unit": ""
+ },
+ "21.001": {
+  "name": "DPT_StatusGen",
+  "unit": ""
+ },
+ "21.002": {
+  "name": "DPT_Device_Control",
+  "unit": ""
+ },
+ "232.600": {
+  "name": "RGB",
+  "unit": ""
+ },
+ "237.600": {
+  "name": "HVAC_Mode",
+  "unit": ""
+ },
+ "238.003": {
+  "name": "DPT_Angle",
+  "unit": "°"
+ },
+ "238.004": {
+  "name": "DPT_Percent_U8",
+  "unit": "%"
+ },
+ "238.005": {
+  "name": "DPT_DecimalFactor",
+  "unit": "ratio"
+ },
+ "238.006": {
+  "name": "DPT_Tariff",
+  "unit": "tariff"
+ },
+ "238.010": {
+  "name": "DPT_Value_1_Ucount",
+  "unit": "pulses"
+ },
+ "238.102": {
+  "name": "HVAC_Mode",
+  "unit": ""
+ },
+ "238.600": {
+  "name": "DPT_DALI_Control_Gear_Diagnostic",
+  "unit": ""
+ }
+}

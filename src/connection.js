@@ -14,6 +14,7 @@ const dnsSync = require('dns-sync')
 const { MQTTconnect, mqdisconnect } = require('./mqwrite')
 //const strtodpt = require('./strtodpt')
 const { loadmapping, mapstring, mapaddress } = require('./strtodpt')
+const { dptInfo } = require('./dptnames')
 const fs = require('fs');
 // added device so switch can be appropriate
 const { dns, port, config, name, path, influxver, logging, device, phyAddr, stack, secure } = workerData?.location
@@ -255,10 +256,10 @@ const connection = knx.Connection({
                 //console.log("New dp %d %j, %j", cnt, dp, dp.dpt.subtype.name);
 
                 groupAddresses[key].endpoint = dp
-                groupAddresses[key].unit =
-                 dp.dpt.subtype !== undefined ? dp.dpt.subtype.unit || '' : ''
-                groupAddresses[key].type =
-                 dp.dpt.subtype !== undefined ? dp.dpt.subtype.name || '' : ''
+                // name and unit from hamon's own table, not the KNX library
+                const info = dptInfo(groupAddresses[key].dpt)
+                groupAddresses[key].unit = info !== undefined ? info.unit : ''
+                groupAddresses[key].type = info !== undefined ? info.name : ''
 
             // set a guard if dpt is not defined for the key
             if (groupAddresses[key].dpt == undefined) {
