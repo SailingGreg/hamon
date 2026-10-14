@@ -122,7 +122,10 @@ function start_worker(path, influxver, loc, survey) {
     });
     worker.on('exit', () => {
       threads.delete(worker)
-      console.log(`Thread exiting, ${threads.size} running...`)
+      // a pending timer means this site is waiting out its restart back-off
+      const why = pending[loc.name] ? ` (back-off, restart ${failures[loc.name]}`
+            + ` in ${backoffDelay(failures[loc.name]) / 60000}min)` : ''
+      console.log(`Thread exiting: ${loc.name}${why}, ${threads.size} running...`)
     })
 
     return (worker);
