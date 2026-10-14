@@ -50,11 +50,11 @@ const WIND_DIR_DEG = {
   "north-westerly": 315
 }
 
-// Survey (per site, `survey: true` in hamon.yml): which GAs send values the
-// float `value` field cannot hold (genuine text, objects). Each worker is one
-// site, so key on GA + DPT; log the first occurrence, then every 100th with a
-// running count, to keep volume low.
-const survey = require('worker_threads').workerData?.location?.survey === true
+// Survey (top-level `survey: true` in hamon.yml, like `influxdb`): which GAs
+// send values the float `value` field cannot hold (genuine text, objects).
+// Each worker is one site, so key on GA + DPT; log the first occurrence, then
+// every 100th with a running count, to keep volume low.
+const survey = require('worker_threads').workerData?.survey === true
 const skipped = new Map()
 function logSkipped(knxloc, dest, name, type, value) {
   if (!survey) return

@@ -16,7 +16,7 @@ const { MQTTconnect, mqdisconnect } = require('./mqwrite')
 const { loadmapping, mapstring, mapaddress } = require('./strtodpt')
 const fs = require('fs');
 // added device so switch can be appropriate
-const { dns, port, config, name, path, influxver, logging, device, phyAddr, stack, secure, survey } = workerData?.location
+const { dns, port, config, name, path, influxver, logging, device, phyAddr, stack, secure } = workerData?.location
 const { secureOptions } = require('./secrets')
 
 // label everything this worker prints (knx library warnings, stray console.log)
@@ -297,9 +297,10 @@ const connection = knx.Connection({
           groupAddresses[dest].unit,
           typeof(groupAddresses[dest].endpoint.current_value)
         )
-        // survey (`survey: true` in hamon.yml): when the ETS DPT cannot decode
-        // the telegram, log the raw payload so the real DPT can be worked out
-        if (survey === true
+        // survey (top-level `survey: true` in hamon.yml): when the ETS DPT
+        // cannot decode the telegram, log the raw payload so the real DPT can
+        // be worked out
+        if (workerData?.survey === true
                 && groupAddresses[dest].endpoint.current_value === undefined
                 && Buffer.isBuffer(value)) {
             logger.info('DBRAW %s %s (%s) %s len=%d hex=%s', name, dest,
