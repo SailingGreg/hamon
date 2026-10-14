@@ -99,14 +99,15 @@ function MQTTconnect(groupAddresses, connection, location) {
             //console.log(`read topic: ${topic}, message: ${msg}`)
             groupAddresses[gad].endpoint.read()
             //connection.read(gad);
-        } else if (cmd == 'on') {
-          //check if on is okay and then action
-          // if (type == DPT_Switch )
-          groupAddresses[gad].endpoint.switchOn()
-        } else if (cmd == 'off') {
-          //check if off is okay and then action
-          // if (type == DPT_Switch )
-          groupAddresses[gad].endpoint.switchOff()
+        } else if (cmd == 'on' || cmd == 'off') {
+          // a Datapoint has no switchOn()/switchOff() (that's knx's
+          // BinarySwitch), so calling them threw outside any try. Write the
+          // boolean: knx 2.4.1 inverts a numeric 1/0 for DPT1
+          try {
+            groupAddresses[gad].endpoint.write(cmd == 'on')
+          } catch (err) {
+            logger.error('Could not %s group address %s, err: %s', cmd, gad, err)
+          }
         } else {
           logger.info('Invalid command %s', cmd)
         }
