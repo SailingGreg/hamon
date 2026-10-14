@@ -13,15 +13,12 @@
  *
  * The type name and unit don't come from here - see dptnames.js.
  *
- * Writes: knx refused out-of-range values, but KNXUltimate encodes them
- * anyway (5.001 128 -> 50%, a negative DPT7 -> 0), so write() checks the
- * range first, and only takes objects for the composite DPTs.
+ * Writes: KNXUltimate encodes out-of-range values anyway (5.001 128 -> 50%,
+ * a negative DPT7 -> 0), so write() checks dptrange.js first.
  */
 const { EventEmitter } = require('events')
 const DPTLib = require('knxultimate/build/dptlib')
-
-// DPTs whose value is an object (or a Date), never a plain number
-const OBJECT_DPTS = new Set([2, 3, 10, 11, 15, 18, 19, 21, 22, 213, 222, 232, 235, 237, 238, 242, 249, 251])
+const { writeError } = require('./dptrange')
 
 class Datapoint extends EventEmitter {
     constructor (options, conn) {
@@ -29,7 +26,6 @@ class Datapoint extends EventEmitter {
         super()
         this.options = options
         this.dptid = options.dpt || 'DPT1.001'   // as knx
-        this.main = Number((String(this.dptid).match(/(\d+)/) || [])[1])
         this.dpt = null
         try {
             this.dpt = DPTLib.resolve(this.dptid)
@@ -69,31 +65,12 @@ class Datapoint extends EventEmitter {
     write (value) {
         if (!this.conn) throw new Error('must supply a valid KNX connection to bind to')
         if (this.dpt === null) throw new Error(`unsupported DPT ${this.dptid}`)
-        if (typeof value === 'number') {
-            if (!Number.isFinite(value)) throw new Error(`${value} is not a number`)
-            if (OBJECT_DPTS.has(this.main)) throw new Error(`${this.dptid} needs an object value, not ${value}`)
-            const range = this.range()
-            if (range && (value < range[0] || value > range[1])) {
-                throw new Error(`${value} out of range [${range}] for ${this.dptid}`)
-            }
-        }
+        const err = writeError(this.dptid, value)
+        if (err) throw new Error(err)
         const apdu = {}
         DPTLib.populateAPDU(value, apdu, this.dptid)
         if (!Buffer.isBuffer(apdu.data)) throw new Error(`${this.dptid} cannot encode ${JSON.stringify(value)}`)
         this.conn.writeRaw(this.options.ga, apdu.data, apdu.bitlength, () => this.update(value))
-    }
-
-    // the value range a plain number must be in, or undefined if not known
-    range () {
-        const st = this.dpt.subtype || {}
-        const bt = this.dpt.basetype || {}
-        const pair = (r) => Array.isArray(r) && r.length === 2 && r.every(Number.isFinite) ? r : undefined
-        const fromBits = () => {
-            const bits = bt.bitlength
-            if (!bt.signedness || !(bits > 1 && bits <= 32)) return undefined
-            return bt.signedness === 'signed' ? [-(2 ** (bits - 1)), 2 ** (bits - 1) - 1] : [0, 2 ** bits - 1]
-        }
-        return pair(st.scalar_range) || pair(st.range) || pair(bt.range) || fromBits()
     }
 
     read (callback) {

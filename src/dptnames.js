@@ -22,4 +22,13 @@ function dptInfo (dpt) {
     return NAMES[`${m[1]}.${m[2]}`]
 }
 
-module.exports = { dptInfo }
+// main DPTs whose value is an object (or a Date), never a plain number
+const OBJECT_DPTS = new Set([2, 3, 10, 11, 15, 18, 19, 21, 22, 213, 222, 232, 235, 237, 238, 242, 249, 251])
+
+// the main type number of a DPT id ('DPT18.001' -> 18), or undefined
+function dptMain (dpt) {
+    const m = String(dpt ?? '').toUpperCase().match(DPT_ID)
+    return m === null ? undefined : Number(m[1])
+}
+
+module.exports = { dptInfo, dptMain, OBJECT_DPTS }

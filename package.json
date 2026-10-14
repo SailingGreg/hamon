@@ -24,7 +24,8 @@
   "license": "MIT",
   "scripts": {
     "lint": "eslint parsexml.js ./src",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "test": "node test/dptnames.test.js && node test/datapoint.test.js && node test/coerce.test.js"
   },
   "devDependencies": {
     "babel-eslint": "^10.1.0",

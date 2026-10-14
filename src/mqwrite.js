@@ -2,6 +2,9 @@ const mqtt = require('mqtt') // added to package.jso
 const logger = require('./logger')
 const { writeActions } = require('./db')
 const { writeActionsv2 } = require('./dbv2')
+const { coerceForDpt } = require('./coerce')
+const { writeError } = require('./dptrange')
+const { dptMain } = require('./dptnames')
 
 const MQTTBROKERIP = 'mqtt://localhost' // needs protocol which is mqtt
 //const MQTTBROKERPORT = 1883 // default
@@ -9,29 +12,6 @@ const topicPrefix = '' || 'knx'
 const gadRegExp = new RegExp(
   topicPrefix + '/(\\w+)/(\\d+)/(\\d+)/(\\d+)(/([\\w\\d]+))?'
 )
-
-// Convert the raw MQTT string payload into the JS type the group address's DPT
-// expects, so knx Datapoint.write() encodes it correctly. Replaces the old
-// unconditional parseInt(), which turned floats (21.5 -> 21), strings and
-// booleans (e.g. "On" -> NaN) into bad values and broke the write.
-function coerceForDpt (dpt, raw) {
-  const s = String(raw).trim()
-  if (s.length === 0) return 0
-  const major = String(dpt || '').split('.')[0]
-  switch (major) {
-    case 'DPT1':            // boolean: switch / bool / enable ...
-      return /^(1|on|true|yes|enable)$/i.test(s)
-    case 'DPT9':            // 2-byte float (temperature, humidity, ...)
-    case 'DPT14':           // 4-byte float
-      return parseFloat(s)
-    case 'DPT16':           // character string
-      return s
-    case '':                // DPT unknown - best effort: number if numeric else string
-      return isNaN(Number(s)) ? s : Number(s)
-    default:                // integer DPTs: DPT5/6/7/8/12/13 (scaling, counts, ...)
-      return parseInt(s, 10)
-  }
-}
 
 let mqttClient = null; // rescope so available to disconnect
 function MQTTconnect(groupAddresses, connection, location) {
@@ -61,14 +41,21 @@ function MQTTconnect(groupAddresses, connection, location) {
         // convert the raw payload to the JS type this GAD's DPT expects
         let value = coerceForDpt(groupAddresses[gad].dpt, msg)
 
-        // log the action - loc, type, target and 'value'. Keep the influx
-        // 'actions.value' field numeric (booleans -> 1/0) so a DPT1 write
-        // doesn't flip the field type and get dropped on a type conflict.
-        let logValue = typeof value === 'boolean' ? (value ? 1 : 0) : value
+        // log the action - loc, type, target and 'value'. The influx
+        // 'actions.value' field is a float, so only numbers go in (booleans and
+        // on/off -> 1/0, a read -> 0); a refused, text or object write is not
+        // logged there (its MQTT Topic line above still is)
+        let logValue
+        if (cmd == 'read') logValue = 0
+        else if (cmd == 'on' || cmd == 'off') logValue = cmd == 'on' ? 1 : 0
+        else if (typeof value === 'boolean') logValue = value ? 1 : 0
+        else if (typeof value === 'number' && Number.isFinite(value)) logValue = value
         // route to the same InfluxDB version as the events path (connection.js):
         // influxver == 1 -> v1 (db.js), otherwise v2 (dbv2.js). All instances are
         // now v2; db.js is kept as the feature-flagged v1 fallback.
-        if (location?.influxver == 1) {
+        if (logValue === undefined) {
+          // nothing numeric to log
+        } else if (location?.influxver == 1) {
           writeActions(location.name, cmd, gad, logValue);
         } else {
           writeActionsv2(location.name, cmd, gad, logValue);
@@ -82,6 +69,10 @@ function MQTTconnect(groupAddresses, connection, location) {
               msg,
               groupAddresses[gad].dpt
             )
+          } else if (writeError(groupAddresses[gad].dpt, value)) {
+            // checked here as both KNX libraries would send some of these as a
+            // different value rather than refuse them
+            logger.error('Ignoring write to %s: %s', gad, writeError(groupAddresses[gad].dpt, value))
           } else {
             try {
               // ref endpoint
@@ -104,6 +95,7 @@ function MQTTconnect(groupAddresses, connection, location) {
           // BinarySwitch), so calling them threw outside any try. Write the
           // boolean: knx 2.4.1 inverts a numeric 1/0 for DPT1
           try {
+            if (dptMain(groupAddresses[gad].dpt) !== 1) throw new Error(`not a DPT1 GA (${groupAddresses[gad].dpt})`)
             groupAddresses[gad].endpoint.write(cmd == 'on')
           } catch (err) {
             logger.error('Could not %s group address %s, err: %s', cmd, gad, err)
