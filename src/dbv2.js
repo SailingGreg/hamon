@@ -52,13 +52,15 @@ const WIND_DIR_DEG = {
 
 // Survey (top-level `survey: true` in hamon.yml, like `influxdb`): which GAs
 // send values the float `value` field cannot hold (genuine text, objects).
-// Each worker is one site, so key on GA + DPT; log the first occurrence, then
-// every 100th with a running count, to keep volume low.
-const survey = require('worker_threads').workerData?.survey === true
+// Key on site + GA + DPT (sites may share this module in one thread); log the
+// first occurrence, then every 100th with a running count, to keep volume low.
+// A worker reads the flag from its workerData; in one thread service.js sets it
+let survey = require('worker_threads').workerData?.survey === true
+function setSurvey(on) { survey = on === true }
 const skipped = new Map()
 function logSkipped(knxloc, dest, name, type, value) {
   if (!survey) return
-  const key = `${dest}|${type}`
+  const key = `${knxloc}|${dest}|${type}`
   const n = (skipped.get(key) || 0) + 1
   skipped.set(key, n)
   if (n != 1 && n % 100 != 0) return
@@ -213,3 +215,4 @@ function writeActionsv2(knxloc, evt, dest, avalue) {
 // changed to exports as there is more than one function
 exports.writeEventsv2 = writeEventsv2
 exports.writeActionsv2 = writeActionsv2
+exports.setSurvey = setSurvey

@@ -6,11 +6,45 @@
  */
 const fs = require('fs')
 const net = require('net')
+const EventEmitter = require('events')
 const { Worker } = require('worker_threads')
 const yaml = require('js-yaml')
 const logger = require('./logger')
 const effectiveStack = require('./knxstack').effective
 const { SiteState, fingerprint, needsPrecheck, CHANGE_FIELDS } = require('./sitestate')
+
+// sites run one per worker thread (the default), or all in this thread with
+// the top-level `threads: false` in hamon.yml - read at start, so a change
+// needs an ha-mon restart
+let useThreads = true
+
+// a site in this thread, looking like a Worker to the rest of this file:
+// 'message', 'error' and 'exit' events, and postMessage({ exit: true })
+class InlineWorker extends EventEmitter {
+    constructor(loc, data) {
+        super()
+        const { createSite } = require('./site')
+        const name = loc.name
+        this.site = createSite(loc, data, {
+            connected: () => this.emit('message', { connected: name }),
+            stopped: (reason, detail) => { this.emit('message', { stopped: name, reason, detail }); this.done() },
+            timeout: () => { this.emit('message', name); this.done() },
+            error: (err) => { this.emit('error', err); this.done() },
+        })
+        setImmediate(() => this.site.start().catch((err) => {
+            this.emit('error', err)
+            this.done()
+        }))
+    }
+    postMessage(msg) {
+        if (msg && msg.exit) this.site.stop().then(() => this.done())
+    }
+    done() {
+        if (this.exited) return
+        this.exited = true
+        setImmediate(() => this.emit('exit', 0))
+    }
+}
 //const dnsSync = require('dns-sync')
 
 let firstRun = true
@@ -132,13 +166,13 @@ function start_worker(path, influxver, loc, survey, stack) {
     // a site that hasn't connected since hamon started gives up after a few
     // minutes and goes into the restart back-off (see connection.js); one
     // that hasn't connected for days first checks its gateway answers
-    const worker = new Worker(path + './src/connection.js', {
-                                    workerData: { location: loc, connectedBefore: everConnected.has(loc.name),
-                                                  precheck: needsPrecheck(siteState != null ? siteState.get(loc.name) : null),
-                                                  failures: failures[loc.name] || 0,
-                                                  survey: survey === true, // top-level `survey: true` in hamon.yml
-                                                  stack: effectiveStack(loc.stack, stack) } // site's, else top-level, else knx
-    })
+    const data = { location: loc, connectedBefore: everConnected.has(loc.name),
+                   precheck: needsPrecheck(siteState != null ? siteState.get(loc.name) : null),
+                   failures: failures[loc.name] || 0,
+                   survey: survey === true, // top-level `survey: true` in hamon.yml
+                   stack: effectiveStack(loc.stack, stack) } // site's, else top-level, else knx
+    const worker = useThreads ? new Worker(path + './src/connection.js', { workerData: data })
+                              : new InlineWorker({ ...loc }, data)
     threads.add(worker)
     setState(loc.name, 'starting')
 
@@ -481,6 +515,17 @@ async function runService(path, hamonConfig) {
 
   if (firstRun) {
     firstRun = false
+    const first = getDoc(hamonConfig)
+    useThreads = first.threads !== false
+    if (!useThreads) {
+        logger.info('threads: false - every site runs in the main thread')
+        require('./dbv2').setSurvey(first.survey === true)
+        // a library error thrown from a socket callback can't be tied to a
+        // site: log it and carry on rather than take every site down
+        process.on('uncaughtException', (err) => {
+            logger.error(`Uncaught exception (main thread): ${err && err.stack || err}`)
+        })
+    }
     siteState = new SiteState(path + 'tmp/site-state.json');
     if (!siteState.load()) logger.info(`No site state from the last run - starting every enabled site`)
     originalDoc = getDoc(hamonConfig); // note so it availabe
