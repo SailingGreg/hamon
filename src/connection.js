@@ -47,12 +47,14 @@ for (const stream of [process.stdout, process.stderr]) {
     levels.forEach((lvl, i) => { if (i > keep) defaultLog[lvl] = () => {} })
 }
 
-// knx (default) or knxultimate - same API either way, see knxstack.js
-const knx = require('./knxstack')(stack)
+// knx or knxultimate - the site's `stack:`, else the top-level `stack:`, else
+// knx (service.js works it out). Same API either way, see knxstack.js
+const siteStack = workerData?.stack || stack
+const knx = require('./knxstack')(siteStack)
 
-// decoder (top-level `decoder:` in hamon.yml, read at ha-mon start): knx
-// (default) decodes/encodes with knx.Datapoint; knxultimate with datapoint.js
-const decoder = workerData?.decoder === 'knxultimate' ? 'knxultimate' : 'knx'
+// the stack picks the decoder too: knx decodes/encodes with knx.Datapoint,
+// knxultimate with datapoint.js (KNXUltimate's dptlib)
+const decoder = siteStack === 'knxultimate' ? 'knxultimate' : 'knx'
 const Datapoint = decoder === 'knxultimate' ? require('./datapoint').Datapoint : knx.Datapoint
 
 // exit if signaled
@@ -124,7 +126,7 @@ const quietRetries = workerData?.connectedBefore !== true && (workerData?.failur
 
 const knxAddr = dnsSync.resolve(dns)
 
-logger.info('KNXnet/IP %s -> %s (stack %s, decoder %s)', dns, knxAddr, stack || 'knx', decoder)
+logger.info('KNXnet/IP %s -> %s (stack %s, decoder %s)', dns, knxAddr, siteStack || 'knx', decoder)
 
 // unresolved: knx would silently fall back to the multicast default and look
 // 'connected' with no data - so fail; service.js logs it and retries with
@@ -137,7 +139,7 @@ if (knxAddr == null) {
 // secrets.js); anything missing or not matching the site throws, as above
 let secureTunnel
 if (secure === true) {
-    secureTunnel = secureOptions(path, workerData.location)
+    secureTunnel = secureOptions(path, { ...workerData.location, stack: siteStack })
     logger.info('%s: KNX Secure tunnel %s (user %d) on gateway %s, %d Data Secure GA(s)', name,
         secureTunnel.tunnelIA, secureTunnel.userId, secureTunnel.gateway,
         Object.keys(secureTunnel.groupKeys).length)

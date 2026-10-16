@@ -282,7 +282,7 @@ class UltimateConnection extends EventEmitter {
         if (typeof callback === 'function') setImmediate(callback)
     }
 
-    // an already-encoded payload (decoder: knxultimate, see datapoint.js)
+    // an already-encoded payload (knxultimate sites, see datapoint.js)
     writeRaw(grpaddr, buf, bitlength, callback) {
         if (grpaddr == null || !Buffer.isBuffer(buf) || !this.client) return
         try {

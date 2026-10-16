@@ -9,6 +9,7 @@ const net = require('net')
 const { Worker } = require('worker_threads')
 const yaml = require('js-yaml')
 const logger = require('./logger')
+const effectiveStack = require('./knxstack').effective
 //const dnsSync = require('dns-sync')
 
 let firstRun = true
@@ -84,7 +85,7 @@ process.on('SIGHUP', sigHandler);
 let originalDoc = {};
 let orgPath = "";
 
-function start_worker(path, influxver, loc, survey, decoder) {
+function start_worker(path, influxver, loc, survey, stack) {
 
     loc["path"] = path; // add path
     loc["influxver"] = influxver; // add influxdb version
@@ -103,7 +104,7 @@ function start_worker(path, influxver, loc, survey, decoder) {
                                     workerData: { location: loc, connectedBefore: everConnected.has(loc.name),
                                                   failures: failures[loc.name] || 0,
                                                   survey: survey === true, // top-level `survey: true` in hamon.yml
-                                                  decoder: decoder } // top-level `decoder: knx|knxultimate` (absent = knx)
+                                                  stack: effectiveStack(loc.stack, stack) } // site's, else top-level, else knx
     })
     threads.add(worker)
 
@@ -142,8 +143,8 @@ function findLoc (name, oDoc) {
     return null;
 }
 
-// compare locations
-function compareLoc(oldLoc, newLoc) {
+// compare locations - the stacks given are the old and new top-level defaults
+function compareLoc(oldLoc, newLoc, oldStack, newStack) {
     let change = false;
 
     // do a field by field comparison - but name excluded!
@@ -155,7 +156,8 @@ function compareLoc(oldLoc, newLoc) {
     if (oldLoc['logging'] != newLoc['logging']) change = true;
     if (oldLoc['phyAddr'] != newLoc['phyAddr']) change = true;
     if (oldLoc['config'] != newLoc['config']) change = true;
-    if (oldLoc['stack'] != newLoc['stack']) change = true;
+    // the stack the site runs on, so a top-level change only restarts the sites it moves
+    if (effectiveStack(oldLoc['stack'], oldStack) != effectiveStack(newLoc['stack'], newStack)) change = true;
     if (oldLoc['secure'] != newLoc['secure']) change = true;
     if (oldLoc['tunnelIA'] != newLoc['tunnelIA']) change = true;
 
@@ -199,7 +201,7 @@ function restart (name) {
     logger.info(`Restarting: ${loc.name} - ${name}`)
 
     // and start it
-    let wrk = start_worker(orgPath, originalDoc.influxdb, loc, originalDoc.survey, originalDoc.decoder);
+    let wrk = start_worker(orgPath, originalDoc.influxdb, loc, originalDoc.survey, originalDoc.stack);
     loc["worker"] = wrk; // and recorded the 'worker'
 
 }
@@ -240,7 +242,7 @@ async function ConnectionService(firstrun, path, doc) {
         if (oldLoc != null) {
 
             // if config change or mtime for config file
-            if (compareLoc(oldLoc, loc) ||
+            if (compareLoc(oldLoc, loc, originalDoc.stack, doc.stack) ||
                     (stats.mtimeMs != oldLoc['mtime'])) {
                 // restart so terminate and start
                 let diff = stats.mtimeMs - oldLoc["mtime"];
@@ -260,7 +262,7 @@ async function ConnectionService(firstrun, path, doc) {
                 }
 
                 if (loc["enabled"] == true) { // restart
-                    wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.decoder);
+                    wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.stack);
                     loc["worker"] = wrk;
                     //doc.locations[location]["worker"] = wrk;
                 } else {
@@ -277,7 +279,7 @@ async function ConnectionService(firstrun, path, doc) {
             //start it
             if (loc["enabled"] == true) { // only if enabled
                 logger.info(`New entry for: ${loc.name}`)
-                wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.decoder);
+                wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.stack);
                 loc["worker"] = wrk;
                 //doc.locations[location]["worker"] = wrk;
             }
@@ -288,7 +290,7 @@ async function ConnectionService(firstrun, path, doc) {
         if (loc["enabled"] == true) { // only if enabled
             logger.info(`First run for: ${loc.name}`)
             // start worker
-            wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.decoder);
+            wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.stack);
             loc["worker"] = wrk;
             //doc.locations[location]["worker"] = wrk;
         }

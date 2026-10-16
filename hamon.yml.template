@@ -2,6 +2,10 @@
 # Configuration file HAMon template
 # Copy to hamon.yml and update as appropriate
 title: "The HAMon configuration file"
+# KNX stack for every location: knx (the default) or knxultimate. A location's
+# own `stack:` overrides it. The stack also picks the library that decodes and
+# encodes values; the stored values and type names are the same either way.
+#stack: knxultimate
 locations:
   Location-1:
     name: "office" # the tag used for logging

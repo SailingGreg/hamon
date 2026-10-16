@@ -1,13 +1,15 @@
 /*
- * knxstack.js - pick the KNX stack for a location (hamon.yml `stack:`)
+ * knxstack.js - pick the KNX stack for a location (hamon.yml `stack:`; the
+ * top-level `stack:` is the default for every location, see effective())
  *
  *   knx          (default) the knx 2.4.1 package, as before
  *   knxultimate  KNXUltimate for the transport (UDP now; TCP / KNX Secure later),
  *                presented through the same Connection API by ultimate-shim.js
  *
- * Either way the caller gets { Connection, Datapoint } and Datapoint is always
- * knx's own, so values are decoded by the same dptlib and the Influx data
- * (value, type, unit) is identical whichever stack a site uses.
+ * Either way the caller gets { Connection, Datapoint } with knx's Datapoint;
+ * connection.js swaps in datapoint.js (KNXUltimate's dptlib) for knxultimate
+ * sites, so the stack picks the decoder too. Type names and units come from
+ * dptnames.json, so the Influx data is the same either way.
  */
 
 module.exports = function (stack) {
@@ -28,4 +30,13 @@ module.exports = function (stack) {
         return { Connection, Datapoint: knx.Datapoint }
     }
     throw new Error(`unknown knx stack '${stack}' (use knx or knxultimate)`)
+}
+
+// the stack a location runs on: its own `stack:`, else the top-level `stack:`
+// in hamon.yml, else knx
+module.exports.effective = function (siteStack, defaultStack) {
+    for (const s of [siteStack, defaultStack]) {
+        if (s != null && s !== '') return s
+    }
+    return 'knx'
 }

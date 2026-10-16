@@ -1,8 +1,8 @@
 /*
  * datapoint.js - knx.Datapoint's job done with KNXUltimate's dptlib
  *
- * Used when hamon.yml has the top-level `decoder: knxultimate` (default knx,
- * which keeps knx.Datapoint). Covers the part of knx.Datapoint hamon uses:
+ * Used for sites on the knxultimate stack (knx sites keep knx.Datapoint).
+ * Covers the part of knx.Datapoint hamon uses:
  *   .current_value    the decoded value of the last Write/Response telegram
  *                     (undefined if the payload doesn't decode for the DPT)
  *   .write(value)     encode and send a GroupValue_Write (raw, so the KNX

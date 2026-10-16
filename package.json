@@ -25,7 +25,7 @@
   "scripts": {
     "lint": "eslint parsexml.js ./src",
     "postinstall": "patch-package",
-    "test": "node test/dptnames.test.js && node test/datapoint.test.js && node test/payload.test.js"
+    "test": "node test/knxstack.test.js && node test/dptnames.test.js && node test/datapoint.test.js && node test/payload.test.js"
   },
   "devDependencies": {
     "babel-eslint": "^10.1.0",

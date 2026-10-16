@@ -31,7 +31,7 @@ function siteSecure(path, name) {
 function secureOptions(path, location) {
     const { name, config, tunnelIA, stack } = location
     if (stack !== 'knxultimate') {
-        throw new Error(`secure: true needs stack: knxultimate (site has ${stack || 'knx'})`)
+        throw new Error(`secure: true needs stack: knxultimate (site runs on ${stack || 'knx'})`)
     }
     const entry = siteSecure(path, name)
     if (!entry) {
