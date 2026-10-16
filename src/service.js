@@ -12,6 +12,7 @@ const yaml = require('js-yaml')
 const logger = require('./logger')
 const effectiveStack = require('./knxstack').effective
 const { SiteState, fingerprint, needsPrecheck, CHANGE_FIELDS } = require('./sitestate')
+const effectiveDedupe = require('./dedupe').effective
 
 // sites run one per worker thread (the default), or all in this thread with
 // the top-level `threads: false` in hamon.yml. A feature flag that can be
@@ -173,7 +174,7 @@ process.on('SIGHUP', sigHandler);
 let originalDoc = {};
 let orgPath = "";
 
-function start_worker(path, influxver, loc, survey, stack) {
+function start_worker(path, influxver, loc, survey, stack, dedupe) {
 
     loc["path"] = path; // add path
     loc["influxver"] = influxver; // add influxdb version
@@ -193,7 +194,8 @@ function start_worker(path, influxver, loc, survey, stack) {
                    precheck: needsPrecheck(siteState != null ? siteState.get(loc.name) : null),
                    failures: failures[loc.name] || 0,
                    survey: survey === true, // top-level `survey: true` in hamon.yml
-                   stack: effectiveStack(loc.stack, stack) } // site's, else top-level, else knx
+                   stack: effectiveStack(loc.stack, stack), // site's, else top-level, else knx
+                   dedupe: effectiveDedupe(loc.dedupe, dedupe) } // ms: site's, else top-level, else 0 (off)
     const worker = useThreads ? new Worker(path + './src/connection.js', { workerData: data })
                               : new InlineWorker({ ...loc }, data)
     threads.add(worker)
@@ -324,7 +326,7 @@ function restart (name) {
     logger.info(`Restarting: ${loc.name} - ${name}`)
 
     // and start it
-    let wrk = start_worker(orgPath, originalDoc.influxdb, loc, originalDoc.survey, originalDoc.stack);
+    let wrk = start_worker(orgPath, originalDoc.influxdb, loc, originalDoc.survey, originalDoc.stack, originalDoc.dedupe);
     loc["worker"] = wrk; // and recorded the 'worker'
 
 }
@@ -373,11 +375,16 @@ async function ConnectionService(firstrun, path, doc) {
             const configChanged = compareLoc(oldLoc, loc, originalDoc.stack, doc.stack) ||
                     (stats.mtimeMs != oldLoc['mtime'])
             const running = threads.has(oldLoc["worker"])
-            if (configChanged || (modeChanged && running)) {
+            // like the threads flag, a dedupe change only restarts a running
+            // site: a blocked site isn't re-checked, one in back-off waits on
+            const dedupeChanged = effectiveDedupe(oldLoc.dedupe, originalDoc.dedupe)
+                    != effectiveDedupe(loc.dedupe, doc.dedupe)
+            if (configChanged || ((modeChanged || dedupeChanged) && running)) {
                 // restart so terminate and start
                 let diff = stats.mtimeMs - oldLoc["mtime"];
                 logger.info(configChanged ? `Change so restarting: ${loc.name} ${diff}`
-                                          : `Restarting in the new threads mode: ${loc.name}`)
+                            : modeChanged ? `Restarting in the new threads mode: ${loc.name}`
+                            : `Restarting with dedupe ${effectiveDedupe(loc.dedupe, doc.dedupe) / 1000}s: ${loc.name}`)
                 if (configChanged) {
                     cancelPending(loc.name);
                     failures[loc.name] = 0;
@@ -396,7 +403,7 @@ async function ConnectionService(firstrun, path, doc) {
                 }
 
                 if (loc["enabled"] == true) { // restart
-                    wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.stack);
+                    wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.stack, doc.dedupe);
                     loc["worker"] = wrk;
                     //doc.locations[location]["worker"] = wrk;
                 } else {
@@ -414,7 +421,7 @@ async function ConnectionService(firstrun, path, doc) {
             //start it
             if (loc["enabled"] == true) { // only if enabled
                 logger.info(`New entry for: ${loc.name}`)
-                wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.stack);
+                wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.stack, doc.dedupe);
                 loc["worker"] = wrk;
                 //doc.locations[location]["worker"] = wrk;
             } else {
@@ -448,7 +455,7 @@ async function ConnectionService(firstrun, path, doc) {
                 scheduleRestart(loc.name, delay);
             } else {
                 // start worker
-                wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.stack);
+                wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.stack, doc.dedupe);
                 loc["worker"] = wrk;
                 //doc.locations[location]["worker"] = wrk;
             }

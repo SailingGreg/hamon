@@ -69,8 +69,9 @@ function logSkipped(knxloc, dest, name, type, value) {
   logger.info(`DBSKIP ${knxloc} ${dest} (${name}) ${type} ${kind} count=${n} value=${shown === undefined ? String(value) : shown.slice(0, 80)}`)
 }
 
-// write to influxDB
-function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit) {
+// write to influxDB; time (a Date) is for a value written after it arrived
+// (dedupe.js), otherwise InfluxDB stamps the point as it lands
+function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit, time) {
   if (evt != 'GroupValue_Write' && evt != 'GroupValue_Response') return;
 
     let dbvalue = 0.0;
@@ -133,11 +134,11 @@ function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit) {
 
 
   // write to influxDB
-  const date = new Date() // this is UTC
+  const stamped = time instanceof Date
   influxdb.write(
         {
             org: "HA",
-            //precision: 'ms'
+            precision: stamped ? 'ms' : undefined,
             bucket: process.env.BUCKET
         },
       [ {
@@ -150,8 +151,8 @@ function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit) {
             name: name,
             type: type
           },
-          fields: { value: dbvalue } //,
-          //timestamp: date
+          fields: { value: dbvalue },
+          timestamp: stamped ? time.getTime() : undefined
         } ]
       /*,
       {

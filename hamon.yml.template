@@ -11,6 +11,11 @@ title: "The HAMon configuration file"
 # location. Takes effect on the next reload of this file, without an ha-mon
 # restart, so it can be set back to true at once if needed.
 #threads: false
+# Store a group address's repeated value at most once every N seconds (a value
+# that changes is always stored at once). Absent or 0: every telegram is
+# stored. A location's own `dedupe:` overrides it (0 turns it off there).
+# Running locations restart with the new setting on the next reload.
+#dedupe: 30
 locations:
   Location-1:
     name: "office" # the tag used for logging
@@ -18,6 +23,7 @@ locations:
     dns: DNS-ENTRY.dyndns.org # the DNS entry
     port: 54321 # Router port
     ets: CONFIG.xml # and the ETS XML export of group addresses
+    #dedupe: 30 # store repeated values at most every 30 s (overrides the top-level dedupe:)
   Location-2:
     name: "home"
     desc: "The home"

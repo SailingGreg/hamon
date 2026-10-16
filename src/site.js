@@ -28,6 +28,7 @@ const { loadmapping, mapstring, mapaddress } = require('./strtodpt')
 const { dptInfo } = require('./dptnames')
 const { secureOptions } = require('./secrets')
 const { describe } = require('./knxdesc')
+const { createDedupe } = require('./dedupe')
 const knxstack = require('./knxstack')
 
 // a site that has never connected since hamon started (dead, or not there yet)
@@ -71,7 +72,7 @@ function localDate() {
 const ctime = () => localDate().replace(/T/, ' ').replace(/\..+/, '')
 
 // location: the hamon.yml entry (plus path, influxver); opts: { stack,
-// connectedBefore, failures, survey, precheck }; hooks: see the top
+// connectedBefore, failures, survey, precheck, dedupe (ms, 0 = off) }; hooks: see the top
 function createSite(location, opts, hooks) {
     const { dns, port, config, name, path, influxver, logging, device, phyAddr, secure } = location
     const siteStack = opts.stack || location.stack
@@ -84,6 +85,12 @@ function createSite(location, opts, hooks) {
     // quiet - otherwise it logs 'connection timed out, retrying...' every few
     // seconds each time
     const quietRetries = opts.connectedBefore !== true && (opts.failures || 0) > 0
+    // bind to influx v1 or v2?
+    const writeEvent = influxver == 1 ? writeEvents : writeEventsv2
+    // `dedupe:` in hamon.yml: a GA's repeats are written at most once per window
+    const dedupe = opts.dedupe > 0
+        ? createDedupe(opts.dedupe, (time, args) => writeEvent(...args, time))
+        : null
 
     let connection = null      // the KNX connection, once connect() has run
     let mqttClient = null
@@ -191,9 +198,9 @@ function createSite(location, opts, hooks) {
                         value.length, value.toString('hex'))
         }
         if (ga.type != undefined && ga.type != '') {
-            // bind to influx v1 or v2?
-            const write = influxver == 1 ? writeEvents : writeEventsv2
-            write(evt, src, dest, name, ga.name, ga.type, ga.endpoint.current_value, ga.unit)
+            const args = [evt, src, dest, name, ga.name, ga.type, ga.endpoint.current_value, ga.unit]
+            if (dedupe) dedupe.push(dest, ga.endpoint.current_value, args)
+            else writeEvent(...args)
         }
     }
 
@@ -261,7 +268,8 @@ function createSite(location, opts, hooks) {
             // unresolved below
         }
         if (finished) return // stopped while resolving
-        logger.info('KNXnet/IP %s -> %s (stack %s, decoder %s%s)', dns, knxAddr, siteStack || 'knx', decoder,
+        logger.info('KNXnet/IP %s -> %s (stack %s, decoder %s%s%s)', dns, knxAddr, siteStack || 'knx', decoder,
+                    dedupe ? `, dedupe ${opts.dedupe / 1000}s` : '',
                     opts.precheck === true ? ', checking the gateway answers first' : '')
         // unresolved: knx would silently fall back to the multicast default and
         // look 'connected' with no data - so stop before any tunnel attempt and
@@ -306,6 +314,7 @@ function createSite(location, opts, hooks) {
     // clear the timers. Safe to call more than once
     function stop() {
         if (stopping) return stopping
+        if (dedupe) dedupe.flushAll() // held repeats are written, not lost
         clearTimeout(firstConnectHandle)
         clearTimeout(timerHandle)
         firstConnectHandle = timerHandle = null
