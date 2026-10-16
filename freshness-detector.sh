@@ -39,6 +39,15 @@
 #     a quiet new site would otherwise be restarted for nothing.  A site back
 #     from more than FIRST_LOOKBACK of silence counts as new too.  The extra
 #     query only runs on scans that find a stale site.
+#   * hamon's own state (tmp/site-state.json, written by ha-mon): a stale site
+#     that hamon reports as NOT connected (down, blocked, starting) is hamon's
+#     to handle - its worker retries with back-off, or the site is blocked - so
+#     it is logged as KNOWN and not restarted. Container sites (dns 172.*) are
+#     the exception: a dead container tunnel looks like any unreachable site to
+#     hamon, and only a docker restart fixes it. A stale site hamon reports as
+#     connected is the "connected but silent" case only this detector can see;
+#     its STALE line says so (hamon: connected), so those cases can be counted.
+#     No file, or ha-mon not running: act as before.
 #   * Cooldown: a site that stays stale is restarted at once, then after
 #     cooldown, 2x, 4x ... cooldown_max, instead of on every 5-minute run.  The
 #     spell (and the doubling) resets as soon as the site is seen fresh again.
@@ -75,6 +84,7 @@ WINDOW="${WINDOW:-24h}"                  # freshness query lookback (>> THRESH_M
                                          # hard-down site ages out of the report
 DRYRUN="${DRYRUN:-1}"                     # 1 = report only (default), 0 = act
 STATE="${STATE:-$HAMON/tmp/freshness-state$([ "$DRYRUN" = 0 ] || echo .dryrun)}"
+SITE_STATE="${SITE_STATE:-$HAMON/tmp/site-state.json}"   # hamon's view of each site
 
 # INFLUX_TOKEN comes from the env file on prod; on hosts where influxd accepts
 # unauthenticated local queries (e.g. staging) the file may be absent and we
@@ -150,6 +160,32 @@ load_first() {  # once per run, and only when a site is stale (not in a subshell
   done < <(firstseen)
   first_loaded=1
 }
+
+# ---- hamon's own state for each site ------------------------------------------
+# "<location> <state>" per site, only while ha-mon is running (file says so and
+# its pid is a live hamon.js - EPERM from kill(0) counts as alive, ha-mon runs
+# as root); nothing otherwise, so a stopped ha-mon leaves the detector as before
+declare -A HAMON_SITE=()
+while read -r l st; do
+  [ -n "$l" ] && HAMON_SITE["$l"]="$st"
+done < <(python3 - "$SITE_STATE" <<'PY' 2>/dev/null
+import json, os, sys
+d = json.load(open(sys.argv[1]))
+pid = d.get("pid")
+if d.get("running") is not True or not isinstance(pid, int):
+    sys.exit(0)
+try:
+    os.kill(pid, 0)
+except PermissionError:
+    pass
+except OSError:
+    sys.exit(0)
+if b"hamon.js" not in open(f"/proc/{pid}/cmdline", "rb").read():
+    sys.exit(0)
+for name, s in d.get("sites", {}).items():
+    print(name, s.get("state", "?"))
+PY
+)
 
 # ---- thresholds + cooldown (THRESH_FILE; env beats file) --------------------
 declare -A SITE_THRESH=()
@@ -233,7 +269,7 @@ now=$(date -u +%s)
 mode_tag=$([ "$DRYRUN" = 0 ] && echo "ACT" || echo "DRYRUN")
 log "freshness scan start ($mode_tag) default=${THRESH_MIN}m overrides=${#SITE_THRESH[@]} cooldown=${COOLDOWN_MIN}-${COOLDOWN_MAX}m grace=${GRACE_MIN}m window=-${WINDOW}"
 
-stale=0 acted=0
+stale=0 acted=0 known=0
 while IFS=, read -r loc ts; do
   [ -n "$loc" ] || continue
   last=$(date -u -d "$ts" +%s 2>/dev/null) || continue
@@ -245,6 +281,15 @@ while IFS=, read -r loc ts; do
   enabled=$(yml_field "$loc" enabled)
   if [ "$enabled" = "false" ]; then
     log "SKIP  $loc stale ${age}m but enabled:false"
+    continue
+  fi
+
+  # hamon already knows this site isn't connected and is handling it
+  # (back-off, or blocked) - leave it, unless only a container restart can help
+  hs="${HAMON_SITE[$loc]:-}"
+  if [ -n "$hs" ] && [ "$hs" != "connected" ] && [[ "$(yml_field "$loc" dns)" != 172.* ]]; then
+    known=$((known + 1))
+    log "KNOWN $loc ${age}m (>=${thresh}m) hamon: $hs - left to hamon"
     continue
   fi
 
@@ -272,7 +317,7 @@ while IFS=, read -r loc ts; do
 
   n=$((n + 1)); acted=$((acted + 1))
   how=$(restart_site "$loc" "$age")
-  log "STALE $loc ${age}m (>=${thresh}m) restart $n: $how"
+  log "STALE $loc ${age}m (>=${thresh}m) hamon: ${hs:-unknown} restart $n: $how"
   slack "HAMON/$loc no data for ${age}m: $how (restart $n)"
   NEW_ACT["$loc"]="$now"; NEW_N["$loc"]="$n"
 done < <(freshness)
@@ -281,5 +326,5 @@ done < <(freshness)
 { for l in "${!NEW_ACT[@]}"; do echo "$l ${NEW_ACT[$l]} ${NEW_N[$l]}"; done; } > "$STATE.tmp" \
   && mv "$STATE.tmp" "$STATE"
 
-log "freshness scan done ($mode_tag) stale=$stale restarted=$acted"
+log "freshness scan done ($mode_tag) stale=$stale known=$known restarted=$acted"
 exit 0

@@ -373,17 +373,17 @@ function connect() {
             // error.log - the first attempt after a start or config change still errors
             logger.log(quietRetries ? 'info' : 'error', '%s **** ERROR: %s %j', ctime, name, connstatus);
 
-            // clear any pending recovery timer before re-arming: a burst of errors
-            // before the next 'connected' would otherwise orphan earlier timers
-            // (timerHandle is overwritten), and an orphan fires handleTimeout ~15min
-            // later - a spurious full-worker restart even after the link recovered.
-            if (timerHandle != null) {
-                clearTimeout(timerHandle);
+            // the recovery timer runs from the FIRST error since the last
+            // 'connected' and is not re-armed by later ones: a stack that keeps
+            // failing more often than every 15min would otherwise push the
+            // restart back for ever (the 'retrying but never reconnecting' case
+            // the freshness detector used to catch). 'connected' clears it
+            if (timerHandle == null) {
+                // set timer for ip changes - changed to 8min based on testing
+                // 8min was not long enough for the network to stabilise
+                // so changed to 15min - 15 * 60 -> 900
+                timerHandle = setTimeout (() => handleTimeout(), 900 * 1000);
             }
-            // set timer for ip changes - changed to 8min based on testing
-            // 8min was not long enough for the network to stabilise
-            // so changed to 15min - 15 * 60 -> 900
-            timerHandle = setTimeout (() => handleTimeout(), 900 * 1000);
         }
       }
     })
