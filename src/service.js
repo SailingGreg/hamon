@@ -361,7 +361,10 @@ async function ConnectionService(firstrun, path, doc) {
             logger.info(`First run for: ${loc.name}`)
             // carry on from the last run (tmp/site-state.json): a blocked site
             // whose config hasn't changed stays blocked, a site in back-off
-            // keeps its count and waits out what's left of its delay
+            // keeps its count and waits out what's left of its delay - unless
+            // it is due a gateway check (no connection in 7 days): that takes
+            // seconds, not a 5-minute worker, so it is checked now and a site
+            // that isn't online is blocked at start
             const last = siteState != null ? siteState.get(loc.name) : null;
             const fp = fingerprint(loc, effectiveStack(loc.stack, doc.stack), stats.mtimeMs);
             if (last != null && last.state !== 'connected') {
@@ -372,7 +375,7 @@ async function ConnectionService(firstrun, path, doc) {
                 logger.info(`${loc.name}: still blocked (${last.reason}) since ${last.since} - not started; `
                             + `change its hamon.yml entry or kpipe it to re-check`)
             } else if (last != null && last.state === 'down' && last.nextRetry != null
-                       && Date.parse(last.nextRetry) > Date.now()) {
+                       && Date.parse(last.nextRetry) > Date.now() && !needsPrecheck(last)) {
                 const delay = Date.parse(last.nextRetry) - Date.now();
                 logger.info(`Back-off resumed: ${loc.name} restart ${failures[loc.name]} in ${Math.round(delay / 60000)}min`)
                 scheduleRestart(loc.name, delay);
