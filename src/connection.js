@@ -350,7 +350,10 @@ const connection = knx.Connection({
     error: function (connstatus) {
         last_err = new Date().getTime(); // note the time
         let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
-        logger.error('%s **** ERROR: %s %j', ctime, name, connstatus);
+        // a never-connected site retrying after its first give-up fails the same
+        // way each time (knxultimate reports it here, knx didn't): keep it out of
+        // error.log - the first attempt after a start or config change still errors
+        logger.log(quietRetries ? 'info' : 'error', '%s **** ERROR: %s %j', ctime, name, connstatus);
 
         // clear any pending recovery timer before re-arming: a burst of errors
         // before the next 'connected' would otherwise orphan earlier timers
