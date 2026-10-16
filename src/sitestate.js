@@ -6,7 +6,8 @@
  *   starting   a worker has been started, not connected yet
  *   connected  the KNX link is up
  *   down       stopped without connecting; waiting out the restart back-off
- *   blocked    stopped for a reason a retry won't fix (DNS); no timed retry -
+ *   blocked    stopped for a reason a retry won't fix (its DNS name doesn't
+ *              resolve, or its gateway doesn't answer); no timed retry -
  *              only a change to the site's own hamon.yml entry or kpipe
  *              re-checks it
  *   disabled   enabled: false in hamon.yml
@@ -31,6 +32,18 @@ function fingerprint(loc, stack, mtime) {
     f.stack = stack
     f.mtime = mtime == null ? null : mtime
     return JSON.stringify(f)
+}
+
+// a site with no connection in this long gets its gateway checked (a KNXnet/IP
+// DESCRIPTION request) before the tunnel, and is blocked if it doesn't answer
+const PRECHECK_DAYS = 7
+
+// does this site's worker check the gateway first? Yes unless it has connected
+// within PRECHECK_DAYS - so a live site that happens to be down when its worker
+// starts gets the normal back-off, never a block
+function needsPrecheck(site, now = new Date(), days = PRECHECK_DAYS) {
+    const last = site != null ? Date.parse(site.lastConnected) : NaN
+    return isNaN(last) || now.getTime() - last > days * 24 * 60 * 60 * 1000
 }
 
 class SiteState {
@@ -109,4 +122,4 @@ class SiteState {
     }
 }
 
-module.exports = { SiteState, fingerprint, CHANGE_FIELDS }
+module.exports = { SiteState, fingerprint, needsPrecheck, PRECHECK_DAYS, CHANGE_FIELDS }

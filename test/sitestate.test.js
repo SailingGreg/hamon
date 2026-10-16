@@ -8,7 +8,7 @@ const assert = require('assert')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { SiteState, fingerprint } = require('../src/sitestate')
+const { SiteState, fingerprint, needsPrecheck } = require('../src/sitestate')
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sitestate-'))
 const file = path.join(dir, 'site-state.json')
@@ -90,6 +90,16 @@ eq(st3.sites, {}, 'damaged file: no sites')
 // an unwritable location: save() returns the error, nothing throws
 const st4 = new SiteState(path.join(dir, 'no-such-dir', 'site-state.json'))
 ok(st4.save() instanceof Error, 'save() to a missing dir returns the error')
+
+// the gateway check before the tunnel: only for a site with no connection
+// in the last 7 days, so a live site that's briefly down is never blocked
+const at = new Date('2026-10-16T12:00:00Z')
+ok(needsPrecheck(undefined, at), 'a new site is checked')
+ok(needsPrecheck({ state: 'down', lastConnected: null }, at), 'never connected: checked')
+ok(!needsPrecheck({ state: 'down', lastConnected: '2026-10-16T09:00:00Z' }, at), 'connected today: not checked')
+ok(!needsPrecheck({ state: 'down', lastConnected: '2026-10-09T12:00:01Z' }, at), 'just under 7 days: not checked')
+ok(needsPrecheck({ state: 'down', lastConnected: '2026-10-09T11:59:59Z' }, at), 'over 7 days: checked')
+ok(needsPrecheck({ state: 'down', lastConnected: 'garbage' }, at), 'unreadable time: checked')
 
 fs.rmSync(dir, { recursive: true, force: true })
 console.log(`sitestate: ${checks} checks passed`)

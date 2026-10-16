@@ -19,6 +19,7 @@ const fs = require('fs');
 // added device so switch can be appropriate
 const { dns, port, config, name, path, influxver, logging, device, phyAddr, stack, secure } = workerData?.location
 const { secureOptions } = require('./secrets')
+const { describe } = require('./knxdesc')
 
 // label everything this worker prints (knx library warnings, stray console.log)
 // with the site name, so lines in hamon.log say which site they came from -
@@ -57,10 +58,17 @@ const knx = require('./knxstack')(siteStack)
 const decoder = siteStack === 'knxultimate' ? 'knxultimate' : 'knx'
 const Datapoint = decoder === 'knxultimate' ? require('./datapoint').Datapoint : knx.Datapoint
 
+let connection = null // the KNX connection, once connect() has run
+
 // exit if signaled
 parentPort.on("message", (value) => {
 	if (value.exit) {
             logger.info("Exiting - doing cleanup for: %s", name);
+            // still checking the gateway (precheck): no tunnel to close
+            if (connection == null) {
+                mqdisconnect();
+                process.exit(0);
+            }
             // tidyup
             // this this need a guard as it throws an error if not connected
             if (connection.state === 'connected' ||
@@ -88,6 +96,10 @@ function handleTimeout() {
     logger.info('%s >>> Timer connection timed out: %s', ctime, name);
 
     // disconnect knx and mqtt
+    if (connection == null) { // still checking the gateway (precheck)
+        parentPort.postMessage( name );
+        process.exit(1);
+    }
     connection.Disconnect();
     mqdisconnect();
 
@@ -126,7 +138,8 @@ const quietRetries = workerData?.connectedBefore !== true && (workerData?.failur
 
 const knxAddr = dnsSync.resolve(dns)
 
-logger.info('KNXnet/IP %s -> %s (stack %s, decoder %s)', dns, knxAddr, siteStack || 'knx', decoder)
+logger.info('KNXnet/IP %s -> %s (stack %s, decoder %s%s)', dns, knxAddr, siteStack || 'knx', decoder,
+    workerData?.precheck === true ? ', checking the gateway answers first' : '')
 
 // unresolved: knx would silently fall back to the multicast default and look
 // 'connected' with no data - so stop before any tunnel attempt and say why;
@@ -184,194 +197,216 @@ let last_err = new Date().getTime(); // time
 let ld = 0;
 let inited = false
 let dp = '' // the datapoint
-// and create connection
-const connection = knx.Connection({
-  ipAddr: knxAddr,
-  ipPort: port,
-  // these set based on device type
-  //forceTunneling: false,
-  forceTunneling: device == "generic" ? true : false,
-  suppress_ack_ldatareq: (device == "loxone" || device == "eibport") ? true : false,
-  physAddr: phyAddr,
-  secure: secureTunnel,   // knxultimate only; undefined = plain tunnelling
-  loglevel: quietRetries ? 'error' : logging,
-  handlers: {
-    connected: function () {
-        ld = new Date().getTime(); // time
-        let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
-        logger.info('%s Connected - %s (%d)', ctime, name, ld - last_err);
-        parentPort.postMessage({ connected: name }); // resets restart back-off
-        if (firstConnectHandle != null) {
-            clearTimeout(firstConnectHandle);
-            firstConnectHandle = null;
-        }
+// and create connection - straight away, or once the gateway has answered a
+// DESCRIPTION request (below)
+function connect() {
+    connection = knx.Connection({
+      ipAddr: knxAddr,
+      ipPort: port,
+      // these set based on device type
+      //forceTunneling: false,
+      forceTunneling: device == "generic" ? true : false,
+      suppress_ack_ldatareq: (device == "loxone" || device == "eibport") ? true : false,
+      physAddr: phyAddr,
+      secure: secureTunnel,   // knxultimate only; undefined = plain tunnelling
+      loglevel: quietRetries ? 'error' : logging,
+      handlers: {
+        connected: function () {
+            ld = new Date().getTime(); // time
+            let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
+            logger.info('%s Connected - %s (%d)', ctime, name, ld - last_err);
+            parentPort.postMessage({ connected: name }); // resets restart back-off
+            if (firstConnectHandle != null) {
+                clearTimeout(firstConnectHandle);
+                firstConnectHandle = null;
+            }
 
-        if (timerHandle != null) {
-            clearTimeout(timerHandle);
-            timerHandle = null; // nulled as clear does not change it!
-            logger.info('%s Timer: clear timer %s', ctime, name);
-        }
+            if (timerHandle != null) {
+                clearTimeout(timerHandle);
+                timerHandle = null; // nulled as clear does not change it!
+                logger.info('%s Timer: clear timer %s', ctime, name);
+            }
 
-        if (inited == false) { // only do this once on initial load
-        inited = true;
-        // need to iterate over the groupAddresses and create the dps
-        var cnt = 0;
-        var udefined = 0;
-        let remapped = 0;
-        let overridden = 0;
-        for (let key in groupAddresses) {
-            // debugging on load
-          if (groupAddresses.hasOwnProperty(key)) {
-            // how do check if DPT is defined?
+            if (inited == false) { // only do this once on initial load
+            inited = true;
+            // need to iterate over the groupAddresses and create the dps
+            var cnt = 0;
+            var udefined = 0;
+            let remapped = 0;
+            let overridden = 0;
+            for (let key in groupAddresses) {
+                // debugging on load
+              if (groupAddresses.hasOwnProperty(key)) {
+                // how do check if DPT is defined?
 
-            // an exact-address rule comes first: it can replace a wrong
-            // ETS dpt ('override') and the misleading name that goes with it
-            const arule = mapaddress(name, key);
-            if (arule !== undefined) {
-                if (arule.dpt !== undefined &&
-                    (arule.override || groupAddresses[key].dpt == undefined)) {
-                    if (groupAddresses[key].dpt == undefined)
-                        remapped++;
-                    else
-                        overridden++;
-                    groupAddresses[key].dpt = arule.dpt;
+                // an exact-address rule comes first: it can replace a wrong
+                // ETS dpt ('override') and the misleading name that goes with it
+                const arule = mapaddress(name, key);
+                if (arule !== undefined) {
+                    if (arule.dpt !== undefined &&
+                        (arule.override || groupAddresses[key].dpt == undefined)) {
+                        if (groupAddresses[key].dpt == undefined)
+                            remapped++;
+                        else
+                            overridden++;
+                        groupAddresses[key].dpt = arule.dpt;
+                    }
+                    if (arule.name !== undefined)
+                        groupAddresses[key].name = arule.name;
                 }
-                if (arule.name !== undefined)
-                    groupAddresses[key].name = arule.name;
+
+                // map name string to dtp
+                if (groupAddresses[key].dpt == undefined) {
+                        groupAddresses[key].dpt =
+                                mapstring(name, groupAddresses[key].name);
+                    if (groupAddresses[key].dpt != undefined)
+                        remapped++;
+                }
+
+
+                //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
+                  // add a default subtype where ETS gave only the main type:
+                  // without one knx's dptlib gives no type name and the GA is never
+                  // stored. 3.007 (dimming) is the usual bare DPT3; DPT3 and DPT18
+                  // decode to objects, so they reach dbv2's composite (DBSKIP) path
+                if (DEFAULT_SUBTYPE[groupAddresses[key].dpt] !== undefined)
+                    groupAddresses[key].dpt += DEFAULT_SUBTYPE[groupAddresses[key].dpt]
+                // construct dp for the group address
+                // note still doing this for undefined DPTs
+                let dp = new Datapoint(
+                  { ga: key, dpt: groupAddresses[key].dpt }, connection
+                )
+                  //if (groupAddresses[key].dpt == "DPT1.001")
+                    //console.log("The dp is %j", dp.dpt);
+                    //console.log("New dp %d %j, %j", cnt, dp, dp.dpt.subtype.name);
+
+                    groupAddresses[key].endpoint = dp
+                    // name and unit from hamon's own table, not the KNX library
+                    const info = dptInfo(groupAddresses[key].dpt)
+                    groupAddresses[key].unit = info !== undefined ? info.unit : ''
+                    groupAddresses[key].type = info !== undefined ? info.name : ''
+
+                // set a guard if dpt is not defined for the key
+                if (groupAddresses[key].dpt == undefined) {
+                    groupAddresses[key].type = undefined;
+                    udefined = udefined + 1;
+                }
+                cnt = cnt + 1
+              }
             }
+            logger.info('GA for %s: %j (%d undefined/%d remapped/%d overridden)',
+                                    name, cnt, udefined, remapped, overridden);
+            // and then connect to MQTT
+            MQTTconnect(groupAddresses, connection, workerData?.location)
 
-            // map name string to dtp
-            if (groupAddresses[key].dpt == undefined) {
-                    groupAddresses[key].dpt =
-                            mapstring(name, groupAddresses[key].name);
-                if (groupAddresses[key].dpt != undefined)
-                    remapped++;
+            /*
+            // done for network ip change testing
+            if (name == "home")  {
+                logger.info('%s >>> Disconnect timer set for: %s', ctime, name);
+                timerHandle = setTimeout (() => handleTimeout(), 180 * 1000);
             }
-
-
-            //console.log("New dp %d %j", cnt, groupAddresses[key].dpt);
-              // add a default subtype where ETS gave only the main type:
-              // without one knx's dptlib gives no type name and the GA is never
-              // stored. 3.007 (dimming) is the usual bare DPT3; DPT3 and DPT18
-              // decode to objects, so they reach dbv2's composite (DBSKIP) path
-            if (DEFAULT_SUBTYPE[groupAddresses[key].dpt] !== undefined)
-                groupAddresses[key].dpt += DEFAULT_SUBTYPE[groupAddresses[key].dpt]
-            // construct dp for the group address
-            // note still doing this for undefined DPTs
-            let dp = new Datapoint(
-              { ga: key, dpt: groupAddresses[key].dpt }, connection
-            )
-              //if (groupAddresses[key].dpt == "DPT1.001")
-                //console.log("The dp is %j", dp.dpt);
-                //console.log("New dp %d %j, %j", cnt, dp, dp.dpt.subtype.name);
-
-                groupAddresses[key].endpoint = dp
-                // name and unit from hamon's own table, not the KNX library
-                const info = dptInfo(groupAddresses[key].dpt)
-                groupAddresses[key].unit = info !== undefined ? info.unit : ''
-                groupAddresses[key].type = info !== undefined ? info.name : ''
-
-            // set a guard if dpt is not defined for the key
-            if (groupAddresses[key].dpt == undefined) {
-                groupAddresses[key].type = undefined;
-                udefined = udefined + 1;
-            }
-            cnt = cnt + 1
+            */
           }
-        }
-        logger.info('GA for %s: %j (%d undefined/%d remapped/%d overridden)',
-                                name, cnt, udefined, remapped, overridden);
-        // and then connect to MQTT
-        MQTTconnect(groupAddresses, connection, workerData?.location)
+        },
+        // on event we get src/dest/value
+        event: function (evt, src, dest, value) {
+          if (groupAddresses.hasOwnProperty(dest)) {
+            let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
 
-        /*
-        // done for network ip change testing
-        if (name == "home")  {
-            logger.info('%s >>> Disconnect timer set for: %s', ctime, name);
-            timerHandle = setTimeout (() => handleTimeout(), 180 * 1000);
-        }
-        */
-      }
-    },
-    // on event we get src/dest/value
-    event: function (evt, src, dest, value) {
-      if (groupAddresses.hasOwnProperty(dest)) {
-        let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '')
-
-        // note use of endpoint.current_value gives the 'decoded' value
-        logger.info(
-          '>> %s Event %s %j -> %j (%s - %s) - %j %s %j',
-          ctime, evt, src, dest,
-          groupAddresses[dest].name,
-          groupAddresses[dest].type,
-          groupAddresses[dest].endpoint.current_value,
-          groupAddresses[dest].unit,
-          typeof(groupAddresses[dest].endpoint.current_value)
-        )
-        // survey (top-level `survey: true` in hamon.yml): when the ETS DPT
-        // cannot decode the telegram, log the raw payload so the real DPT can
-        // be worked out
-        if (workerData?.survey === true
-                && groupAddresses[dest].endpoint.current_value === undefined
-                && Buffer.isBuffer(value)) {
-            logger.info('DBRAW %s %s (%s) %s len=%d hex=%s', name, dest,
-              groupAddresses[dest].name, groupAddresses[dest].type,
-              value.length, value.toString('hex'))
-        }
-        // encode the evt to shorten it - "gw" or "re"
-        if (groupAddresses[dest].type != undefined 
-                && groupAddresses[dest].type != '') { // if type
-            // bind to influx v1 or v2?
-            if (influxver == 1) {
-                writeEvents(
-                  evt,
-                  src,
-                  dest,
-                  //knxnetLoc,
-                  name,
-                  groupAddresses[dest].name,
-                  groupAddresses[dest].type,
-                  groupAddresses[dest].endpoint.current_value,
-                  groupAddresses[dest].unit
-                )
-            } else {
-                writeEventsv2(
-                  evt,
-                  src,
-                  dest,
-                  //knxnetLoc,
-                  name,
-                  groupAddresses[dest].name,
-                  groupAddresses[dest].type,
-                  groupAddresses[dest].endpoint.current_value,
-                  groupAddresses[dest].unit
-                )
+            // note use of endpoint.current_value gives the 'decoded' value
+            logger.info(
+              '>> %s Event %s %j -> %j (%s - %s) - %j %s %j',
+              ctime, evt, src, dest,
+              groupAddresses[dest].name,
+              groupAddresses[dest].type,
+              groupAddresses[dest].endpoint.current_value,
+              groupAddresses[dest].unit,
+              typeof(groupAddresses[dest].endpoint.current_value)
+            )
+            // survey (top-level `survey: true` in hamon.yml): when the ETS DPT
+            // cannot decode the telegram, log the raw payload so the real DPT can
+            // be worked out
+            if (workerData?.survey === true
+                    && groupAddresses[dest].endpoint.current_value === undefined
+                    && Buffer.isBuffer(value)) {
+                logger.info('DBRAW %s %s (%s) %s len=%d hex=%s', name, dest,
+                  groupAddresses[dest].name, groupAddresses[dest].type,
+                  value.length, value.toString('hex'))
             }
+            // encode the evt to shorten it - "gw" or "re"
+            if (groupAddresses[dest].type != undefined 
+                    && groupAddresses[dest].type != '') { // if type
+                // bind to influx v1 or v2?
+                if (influxver == 1) {
+                    writeEvents(
+                      evt,
+                      src,
+                      dest,
+                      //knxnetLoc,
+                      name,
+                      groupAddresses[dest].name,
+                      groupAddresses[dest].type,
+                      groupAddresses[dest].endpoint.current_value,
+                      groupAddresses[dest].unit
+                    )
+                } else {
+                    writeEventsv2(
+                      evt,
+                      src,
+                      dest,
+                      //knxnetLoc,
+                      name,
+                      groupAddresses[dest].name,
+                      groupAddresses[dest].type,
+                      groupAddresses[dest].endpoint.current_value,
+                      groupAddresses[dest].unit
+                    )
+                }
+            }
+          }
+        },
+        error: function (connstatus) {
+            last_err = new Date().getTime(); // note the time
+            let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
+            // a never-connected site retrying after its first give-up fails the same
+            // way each time (knxultimate reports it here, knx didn't): keep it out of
+            // error.log - the first attempt after a start or config change still errors
+            logger.log(quietRetries ? 'info' : 'error', '%s **** ERROR: %s %j', ctime, name, connstatus);
+
+            // clear any pending recovery timer before re-arming: a burst of errors
+            // before the next 'connected' would otherwise orphan earlier timers
+            // (timerHandle is overwritten), and an orphan fires handleTimeout ~15min
+            // later - a spurious full-worker restart even after the link recovered.
+            if (timerHandle != null) {
+                clearTimeout(timerHandle);
+            }
+            // set timer for ip changes - changed to 8min based on testing
+            // 8min was not long enough for the network to stabilise
+            // so changed to 15min - 15 * 60 -> 900
+            timerHandle = setTimeout (() => handleTimeout(), 900 * 1000);
         }
       }
-    },
-    error: function (connstatus) {
-        last_err = new Date().getTime(); // note the time
-        let ctime = localDate().replace(/T/, ' ').replace(/\..+/, '');
-        // a never-connected site retrying after its first give-up fails the same
-        // way each time (knxultimate reports it here, knx didn't): keep it out of
-        // error.log - the first attempt after a start or config change still errors
-        logger.log(quietRetries ? 'info' : 'error', '%s **** ERROR: %s %j', ctime, name, connstatus);
+    })
+}
 
-        // clear any pending recovery timer before re-arming: a burst of errors
-        // before the next 'connected' would otherwise orphan earlier timers
-        // (timerHandle is overwritten), and an orphan fires handleTimeout ~15min
-        // later - a spurious full-worker restart even after the link recovered.
-        if (timerHandle != null) {
-            clearTimeout(timerHandle);
+// a site that hasn't connected recently (service.js decides: none in the last
+// 7 days, from tmp/site-state.json) first checks the gateway is there at all.
+// No reply: stop before any tunnel attempt and say why; service.js blocks the
+// site until its hamon.yml entry changes or it is kpiped
+if (workerData?.precheck === true) {
+    describe(knxAddr, port).then((answered) => {
+        if (answered) {
+            connect();
+        } else {
+            parentPort.postMessage({ stopped: name, reason: 'unreachable',
+                                     detail: `no reply to DESCRIPTION from ${knxAddr}:${port}` });
+            process.exit(0);
         }
-        // set timer for ip changes - changed to 8min based on testing
-        // 8min was not long enough for the network to stabilise
-        // so changed to 15min - 15 * 60 -> 900
-        timerHandle = setTimeout (() => handleTimeout(), 900 * 1000);
-    }
-  }
-})
+    });
+} else {
+    connect();
+}
+
 // return local date/time - this uses ISO structure
 function localDate() {
   var date = new Date()
@@ -381,4 +416,3 @@ function localDate() {
   return isoDateTime
 }
 
-module.exports.connection = connection

@@ -10,7 +10,7 @@ const { Worker } = require('worker_threads')
 const yaml = require('js-yaml')
 const logger = require('./logger')
 const effectiveStack = require('./knxstack').effective
-const { SiteState, fingerprint, CHANGE_FIELDS } = require('./sitestate')
+const { SiteState, fingerprint, needsPrecheck, CHANGE_FIELDS } = require('./sitestate')
 //const dnsSync = require('dns-sync')
 
 let firstRun = true
@@ -130,9 +130,11 @@ function start_worker(path, influxver, loc, survey, stack) {
     loc["worker"]=""; // delete the worker so the structure can be cloned
 
     // a site that hasn't connected since hamon started gives up after a few
-    // minutes and goes into the restart back-off (see connection.js)
+    // minutes and goes into the restart back-off (see connection.js); one
+    // that hasn't connected for days first checks its gateway answers
     const worker = new Worker(path + './src/connection.js', {
                                     workerData: { location: loc, connectedBefore: everConnected.has(loc.name),
+                                                  precheck: needsPrecheck(siteState != null ? siteState.get(loc.name) : null),
                                                   failures: failures[loc.name] || 0,
                                                   survey: survey === true, // top-level `survey: true` in hamon.yml
                                                   stack: effectiveStack(loc.stack, stack) } // site's, else top-level, else knx
@@ -225,11 +227,13 @@ function scheduleRestart(name, delay) {
     }, delay);
 }
 
-// a worker stopped and said why. DNS: blocked - no timed retry; a change to
-// the site's own hamon.yml entry (or its GA file) or kpipe re-checks it
+// a worker stopped and said why. Its DNS name doesn't resolve, or its gateway
+// doesn't answer: blocked - no timed retry; a change to the site's own
+// hamon.yml entry (or its GA file) or kpipe re-checks it
+const BLOCK_REASONS = ['dns', 'unreachable']
 function stopped(data) {
     const name = data.stopped;
-    if (data.reason !== 'dns') { // not one we block on: as a timeout
+    if (!BLOCK_REASONS.includes(data.reason)) { // not one we block on: as a timeout
         logger.info(`${name}: stopped (${data.reason}) - ${data.detail}`)
         requestRestart(name);
         return;
@@ -440,26 +444,36 @@ async function runService(path, hamonConfig) {
         });
     });
 
+  // reload so changes available
+  function reload() {
+      d = new Date().getTime(); // refresh time
+      logger.info("Checking .... %d", (d - last_time));
+      let newDoc = getDoc(hamonConfig);
+      let rs = ConnectionService(false, path, newDoc);
+      originalDoc = newDoc;
+      last_time = d; // note time
+      return rs;
+  }
+
+  // at most one reload per RELOAD_GAP: a change inside it (e.g. a second save
+  // straight after the first) is applied when the gap ends, not dropped -
+  // a save is how a blocked site gets re-checked
+  const RELOAD_GAP = 15 * 1000
+  let deferred = null
   fs.watchFile(hamonConfig, function (curr, present) {
-      //console.log("fs.watch: ", event, filename);
-      /*
-       * put a guard in here so resets only if not called with the last
-       * 10 seconds?
-       */
         d = new Date().getTime(); // refresh time
         logger.info("runTime %d -> %d", d, last_time);
-        if (d > (last_time + (15 * 1000))) {
-            logger.info("Checking .... %d", (d - last_time));
-        
-            // reload so changes available
-            let newDoc = getDoc(hamonConfig);
-            let rs = ConnectionService(false, path, newDoc);
-            originalDoc = newDoc;
-            last_time = d; // note time
-       
-            return rs;
+        if (d > (last_time + RELOAD_GAP)) {
+            return reload();
         }
-    //return ConnectionService(path, getDoc(hamonConfig))
+        if (deferred == null) {
+            const wait = last_time + RELOAD_GAP - d + 100;
+            logger.info(`hamon.yml changed ${d - last_time}ms after the last reload - applying it in ${wait}ms`)
+            deferred = setTimeout(() => {
+                deferred = null;
+                reload();
+            }, wait);
+        }
   })
 
   if (firstRun) {
