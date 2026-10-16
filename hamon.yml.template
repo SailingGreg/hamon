@@ -6,6 +6,11 @@ title: "The HAMon configuration file"
 # own `stack:` overrides it. The stack also picks the library that decodes and
 # encodes values; the stored values and type names are the same either way.
 #stack: knxultimate
+# Run every location in hamon's main thread (about 10 MB a location) instead of
+# one worker thread each (about 50-60 MB). Absent or true: one thread per
+# location. Takes effect on the next reload of this file, without an ha-mon
+# restart, so it can be set back to true at once if needed.
+#threads: false
 locations:
   Location-1:
     name: "office" # the tag used for logging

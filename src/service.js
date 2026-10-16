@@ -14,9 +14,32 @@ const effectiveStack = require('./knxstack').effective
 const { SiteState, fingerprint, needsPrecheck, CHANGE_FIELDS } = require('./sitestate')
 
 // sites run one per worker thread (the default), or all in this thread with
-// the top-level `threads: false` in hamon.yml - read at start, so a change
-// needs an ha-mon restart
+// the top-level `threads: false` in hamon.yml. A feature flag that can be
+// backed out live: when it changes, the next hamon.yml reload stops every
+// site and starts it again in the other mode (no ha-mon restart)
 let useThreads = true
+
+// in one thread, a library error thrown from a socket callback can't be tied
+// to a site: log it and carry on rather than take every site down
+function uncaught(err) {
+    logger.error(`Uncaught exception (main thread): ${err && err.stack || err}`)
+}
+
+// apply the threads flag from hamon.yml; true if the mode changed
+function setThreads(doc) {
+    const want = doc.threads !== false
+    require('./dbv2').setSurvey(doc.survey === true) // used by sites in this thread
+    if (want === useThreads) return false
+    useThreads = want
+    if (useThreads) {
+        process.removeListener('uncaughtException', uncaught)
+        logger.info('threads: one worker thread per site')
+    } else {
+        process.on('uncaughtException', uncaught)
+        logger.info('threads: false - every site runs in the main thread')
+    }
+    return true
+}
 
 // a site in this thread, looking like a Worker to the rest of this file:
 // 'message', 'error' and 'exit' events, and postMessage({ exit: true })
@@ -328,6 +351,11 @@ async function ConnectionService(firstrun, path, doc) {
   */
   // iterate over the 'existing' config and see if new or changed
   //console.log(doc.influxdb)
+  // threads flag changed: every running site restarts in the new mode (a
+  // blocked site, or one waiting out its back-off, uses it at its next start)
+  const modeChanged = firstrun != true && setThreads(doc)
+  if (modeChanged) logger.info('threads changed - restarting the running sites in the new mode')
+
   for (location in doc.locations) {
     let loc = doc.locations[location]
     logger.info(`Checking: ${loc.name} ${loc.dns} ${loc.port} ${loc.device}`)
@@ -342,24 +370,29 @@ async function ConnectionService(firstrun, path, doc) {
         if (oldLoc != null) {
 
             // if config change or mtime for config file
-            if (compareLoc(oldLoc, loc, originalDoc.stack, doc.stack) ||
-                    (stats.mtimeMs != oldLoc['mtime'])) {
+            const configChanged = compareLoc(oldLoc, loc, originalDoc.stack, doc.stack) ||
+                    (stats.mtimeMs != oldLoc['mtime'])
+            const running = threads.has(oldLoc["worker"])
+            if (configChanged || (modeChanged && running)) {
                 // restart so terminate and start
                 let diff = stats.mtimeMs - oldLoc["mtime"];
-                logger.info(`Change so restarting: ${loc.name} ${diff}`)
-                cancelPending(loc.name);
-                failures[loc.name] = 0;
-                delete lastBlocked[loc.name];
+                logger.info(configChanged ? `Change so restarting: ${loc.name} ${diff}`
+                                          : `Restarting in the new threads mode: ${loc.name}`)
+                if (configChanged) {
+                    cancelPending(loc.name);
+                    failures[loc.name] = 0;
+                    delete lastBlocked[loc.name];
+                }
 
                 //terminate and restart
                 // we don't need to delete as it is done on exit
                 wrk = oldLoc["worker"];
-                //console.log("wrk is null? ", wrk == null);
-                if (wrk != null) {
+                if (running) {
                     logger.info("Existing worker terminating");
                     wrk.postMessage({ exit: true });
                 } else {
-                    logger.error("Worker is null - can't terminate");
+                    // blocked, or waiting out its back-off: nothing to stop
+                    logger.info(`No running worker for: ${loc.name}`);
                 }
 
                 if (loc["enabled"] == true) { // restart
@@ -515,17 +548,7 @@ async function runService(path, hamonConfig) {
 
   if (firstRun) {
     firstRun = false
-    const first = getDoc(hamonConfig)
-    useThreads = first.threads !== false
-    if (!useThreads) {
-        logger.info('threads: false - every site runs in the main thread')
-        require('./dbv2').setSurvey(first.survey === true)
-        // a library error thrown from a socket callback can't be tied to a
-        // site: log it and carry on rather than take every site down
-        process.on('uncaughtException', (err) => {
-            logger.error(`Uncaught exception (main thread): ${err && err.stack || err}`)
-        })
-    }
+    setThreads(getDoc(hamonConfig))
     siteState = new SiteState(path + 'tmp/site-state.json');
     if (!siteState.load()) logger.info(`No site state from the last run - starting every enabled site`)
     originalDoc = getDoc(hamonConfig); // note so it availabe
