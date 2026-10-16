@@ -19,3 +19,6 @@ reference/
 
 # per-location passwords written by hamon-upload (mode 600) - never commit
 .hamon-secrets.json
+
+# runtime files written by ha-mon (kpipe, site-state.json)
+tmp/

@@ -10,6 +10,7 @@ const { Worker } = require('worker_threads')
 const yaml = require('js-yaml')
 const logger = require('./logger')
 const effectiveStack = require('./knxstack').effective
+const { SiteState, fingerprint, CHANGE_FIELDS } = require('./sitestate')
 //const dnsSync = require('dns-sync')
 
 let firstRun = true
@@ -25,6 +26,29 @@ const BACKOFF_MAX = 4 * 60 * 60 * 1000 // 4h
 const failures = {} // consecutive restarts without a connection, by name
 const everConnected = new Set() // sites that have connected since hamon started
 const pending = {} // back-off timers, by name
+const lastBlocked = {} // why a site was last blocked, until it connects or its config changes
+
+// each site's state, kept in tmp/site-state.json (see sitestate.js); set up in
+// runService. Saves are batched so a start of 40 sites writes the file once
+let siteState = null
+let saveTimer = null
+let saveFailed = false
+function saveState() {
+    if (siteState == null || saveTimer != null) return
+    saveTimer = setTimeout(() => {
+        saveTimer = null
+        reportSave(siteState.save())
+    }, 500)
+}
+function reportSave(err) {
+    if (err != null && !saveFailed) logger.error(`Site state not saved: ${err}`) // once, not every change
+    saveFailed = err != null
+}
+function setState(name, state, extra = {}) {
+    if (siteState == null) return
+    siteState.set(name, state, { failures: failures[name] || 0, ...extra })
+    saveState()
+}
 
 function backoffDelay(count) {
     if (count <= RESTART_FREE) return 0;
@@ -53,6 +77,13 @@ function sigHandler(signal) {
     sigcnt++;
     if (sigcnt > 1) // use this to ensure abort
         process.exit(1);
+
+    // the state file says ha-mon has stopped (the site states are kept for the next start)
+    if (siteState != null) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        reportSave(siteState.save(false));
+    }
 
     // signal threads to exit
     for (let worker of threads) {
@@ -107,6 +138,7 @@ function start_worker(path, influxver, loc, survey, stack) {
                                                   stack: effectiveStack(loc.stack, stack) } // site's, else top-level, else knx
     })
     threads.add(worker)
+    setState(loc.name, 'starting')
 
     // an uncaught error (e.g. knx rejecting a reserved address) ends this
     // worker - restart just this site rather than taking down hamon
@@ -118,6 +150,10 @@ function start_worker(path, influxver, loc, survey, stack) {
        if (data && data.connected) { // KNX link up - clear the back-off
            failures[data.connected] = 0;
            everConnected.add(data.connected);
+           delete lastBlocked[data.connected];
+           setState(data.connected, 'connected');
+       } else if (data && data.stopped) { // the worker stopped and says why
+           stopped(data);
        } else {
            requestRestart(data); // worker timed out - pass location
        }
@@ -125,8 +161,10 @@ function start_worker(path, influxver, loc, survey, stack) {
     worker.on('exit', () => {
       threads.delete(worker)
       // a pending timer means this site is waiting out its restart back-off
+      const st = siteState != null ? siteState.get(loc.name) : null
       const why = pending[loc.name] ? ` (back-off, restart ${failures[loc.name]}`
-            + ` in ${backoffDelay(failures[loc.name]) / 60000}min)` : ''
+            + ` in ${backoffDelay(failures[loc.name]) / 60000}min)`
+            : (st != null && st.state === 'blocked') ? ` (blocked, ${st.reason})` : ''
       console.log(`Thread exiting: ${loc.name}${why}, ${threads.size} running...`)
     })
 
@@ -147,19 +185,13 @@ function findLoc (name, oDoc) {
 function compareLoc(oldLoc, newLoc, oldStack, newStack) {
     let change = false;
 
-    // do a field by field comparison - but name excluded!
-    //if (oldLoc['name'] != newLoc['name']) change = true;
-    if (oldLoc['enabled'] != newLoc['enabled']) change = true;
-    if (oldLoc['dns'] != newLoc['dns']) change = true;
-    if (oldLoc['port'] != newLoc['port']) change = true;
-    if (oldLoc['device'] != newLoc['device']) change = true;
-    if (oldLoc['logging'] != newLoc['logging']) change = true;
-    if (oldLoc['phyAddr'] != newLoc['phyAddr']) change = true;
-    if (oldLoc['config'] != newLoc['config']) change = true;
+    // do a field by field comparison - but name excluded! (the fields are
+    // shared with sitestate.js, which ties a block to them)
+    for (const f of CHANGE_FIELDS) {
+        if (oldLoc[f] != newLoc[f]) change = true;
+    }
     // the stack the site runs on, so a top-level change only restarts the sites it moves
     if (effectiveStack(oldLoc['stack'], oldStack) != effectiveStack(newLoc['stack'], newStack)) change = true;
-    if (oldLoc['secure'] != newLoc['secure']) change = true;
-    if (oldLoc['tunnelIA'] != newLoc['tunnelIA']) change = true;
 
     return change; // return flag
 }
@@ -172,8 +204,14 @@ function requestRestart(name) {
         restart(name);
         return;
     }
-    cancelPending(name);
     logger.info(`Back-off: ${name} restart ${failures[name]} in ${delay / 60000}min`)
+    scheduleRestart(name, delay);
+}
+
+// restart a site after its back-off wait
+function scheduleRestart(name, delay) {
+    cancelPending(name);
+    setState(name, 'down', { nextRetry: new Date(Date.now() + delay).toISOString() });
     pending[name] = setTimeout(() => {
         delete pending[name];
         // the config may have changed while waiting
@@ -182,8 +220,32 @@ function requestRestart(name) {
             restart(name);
         } else {
             logger.info(`Back-off: ${name} no longer enabled, not restarting`)
+            setState(name, 'disabled');
         }
     }, delay);
+}
+
+// a worker stopped and said why. DNS: blocked - no timed retry; a change to
+// the site's own hamon.yml entry (or its GA file) or kpipe re-checks it
+function stopped(data) {
+    const name = data.stopped;
+    if (data.reason !== 'dns') { // not one we block on: as a timeout
+        logger.info(`${name}: stopped (${data.reason}) - ${data.detail}`)
+        requestRestart(name);
+        return;
+    }
+    cancelPending(name);
+    const loc = findLoc(name, originalDoc);
+    const fp = loc != null ? fingerprint(loc, effectiveStack(loc.stack, originalDoc.stack), loc.mtime) : null;
+    // a kpipe re-check that fails the same way stays out of error.log
+    if (lastBlocked[name] === data.reason) {
+        logger.info(`${name}: still blocked (${data.reason}) - ${data.detail}`)
+    } else {
+        logger.error(`${name}: BLOCKED (${data.reason}) - ${data.detail}; `
+                     + `re-checked when its hamon.yml entry changes or on kpipe`)
+    }
+    lastBlocked[name] = data.reason;
+    setState(name, 'blocked', { reason: data.reason, detail: data.detail, fingerprint: fp });
 }
 
 // start/restart the location
@@ -249,6 +311,7 @@ async function ConnectionService(firstrun, path, doc) {
                 logger.info(`Change so restarting: ${loc.name} ${diff}`)
                 cancelPending(loc.name);
                 failures[loc.name] = 0;
+                delete lastBlocked[loc.name];
 
                 //terminate and restart
                 // we don't need to delete as it is done on exit
@@ -267,6 +330,7 @@ async function ConnectionService(firstrun, path, doc) {
                     //doc.locations[location]["worker"] = wrk;
                 } else {
                     logger.info(`Not restarting: ${loc.name}`)
+                    setState(loc.name, 'disabled');
                 }
 
             } else { // do nothing
@@ -282,6 +346,8 @@ async function ConnectionService(firstrun, path, doc) {
                 wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.stack);
                 loc["worker"] = wrk;
                 //doc.locations[location]["worker"] = wrk;
+            } else {
+                setState(loc.name, 'disabled');
             }
         }
 
@@ -289,16 +355,42 @@ async function ConnectionService(firstrun, path, doc) {
         //console.log(loc);
         if (loc["enabled"] == true) { // only if enabled
             logger.info(`First run for: ${loc.name}`)
-            // start worker
-            wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.stack);
-            loc["worker"] = wrk;
-            //doc.locations[location]["worker"] = wrk;
+            // carry on from the last run (tmp/site-state.json): a blocked site
+            // whose config hasn't changed stays blocked, a site in back-off
+            // keeps its count and waits out what's left of its delay
+            const last = siteState != null ? siteState.get(loc.name) : null;
+            const fp = fingerprint(loc, effectiveStack(loc.stack, doc.stack), stats.mtimeMs);
+            if (last != null && last.state !== 'connected') {
+                failures[loc.name] = last.failures || 0;
+            }
+            if (siteState != null && siteState.stillBlocked(loc.name, fp)) {
+                lastBlocked[loc.name] = last.reason;
+                logger.info(`${loc.name}: still blocked (${last.reason}) since ${last.since} - not started; `
+                            + `change its hamon.yml entry or kpipe it to re-check`)
+            } else if (last != null && last.state === 'down' && last.nextRetry != null
+                       && Date.parse(last.nextRetry) > Date.now()) {
+                const delay = Date.parse(last.nextRetry) - Date.now();
+                logger.info(`Back-off resumed: ${loc.name} restart ${failures[loc.name]} in ${Math.round(delay / 60000)}min`)
+                scheduleRestart(loc.name, delay);
+            } else {
+                // start worker
+                wrk = start_worker(path, doc.influxdb, loc, doc.survey, doc.stack);
+                loc["worker"] = wrk;
+                //doc.locations[location]["worker"] = wrk;
+            }
+        } else {
+            setState(loc.name, 'disabled');
         }
     }
 
     // note the current config file stamp
     loc["mtime"] = stats.mtimeMs;
     //console.log("Loc ", loc);
+  }
+  // sites taken out of hamon.yml drop out of the state file
+  if (siteState != null) {
+    siteState.retain(Object.values(doc.locations || {}).map(l => l.name));
+    saveState();
   }
 }
 
@@ -331,15 +423,16 @@ async function runService(path, hamonConfig) {
                 if (oldLoc != null && (oldLoc["enabled"] == true)) {
                     let wrk = oldLoc["worker"];
                     //console.log("wrk is null? ", wrk == null);
-                    if (wrk != null) {
+                    if (wrk != null && wrk !== "") {
                         logger.info("Terminating existing worker");
                         wrk.postMessage({ exit: true });
-
-                        // and now restart - immediately, overriding any
-                        // back-off wait (the failure count is kept)
-                        cancelPending(ksite);
-                        restart(ksite);
                     }
+                    // and now restart - immediately, overriding any back-off
+                    // wait (the failure count is kept). This is also how a
+                    // blocked site is re-checked, which may have no worker
+                    // (blocked at the last start)
+                    cancelPending(ksite);
+                    restart(ksite);
                 } else {
                     logger.info(`Can't find location ${ksite}`);
                 }
@@ -371,6 +464,8 @@ async function runService(path, hamonConfig) {
 
   if (firstRun) {
     firstRun = false
+    siteState = new SiteState(path + 'tmp/site-state.json');
+    if (!siteState.load()) logger.info(`No site state from the last run - starting every enabled site`)
     originalDoc = getDoc(hamonConfig); // note so it availabe
     return ConnectionService(true, path, originalDoc);
      // getDoc(hamonConfig))

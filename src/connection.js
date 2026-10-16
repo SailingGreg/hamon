@@ -129,10 +129,13 @@ const knxAddr = dnsSync.resolve(dns)
 logger.info('KNXnet/IP %s -> %s (stack %s, decoder %s)', dns, knxAddr, siteStack || 'knx', decoder)
 
 // unresolved: knx would silently fall back to the multicast default and look
-// 'connected' with no data - so fail; service.js logs it and retries with
-// back-off (thrown rather than logged here as the worker exits before flush)
+// 'connected' with no data - so stop before any tunnel attempt and say why;
+// service.js logs it and blocks the site (no timed retry) until its hamon.yml
+// entry changes or it is kpiped. Logged by the parent, as this worker exits
+// before its own log lines flush
 if (knxAddr == null) {
-    throw new Error(`DNS lookup failed for ${dns}`);
+    parentPort.postMessage({ stopped: name, reason: 'dns', detail: `DNS lookup failed for ${dns}` });
+    process.exit(0);
 }
 
 // KNX Secure tunnelling: the values come from .hamon-secrets.json (see
