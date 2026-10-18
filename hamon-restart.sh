@@ -22,7 +22,7 @@
 # Usage:
 #   ./hamon-restart.sh            # asks for confirmation
 #   ./hamon-restart.sh -y         # no prompt
-# Env overrides: GATEWAY_WAIT (130s), CLEAN_WAIT (10s), CHECK_WAIT (150s),
+# Env overrides: GATEWAY_WAIT (130s), CLEAN_WAIT (3s), CHECK_WAIT (150s),
 #                STOP_LIMIT (120s)
 #
 set -u
@@ -35,7 +35,7 @@ KPIPE="$HAMON/tmp/kpipe"
 STATE="$HAMON/tmp/site-state.json"
 OUT="$HAMON/hamon.log"                # hamon's stdout: the workers' disconnect lines
 GATEWAY_WAIT="${GATEWAY_WAIT:-130}"   # > 120s KNXnet/IP connection timeout
-CLEAN_WAIT="${CLEAN_WAIT:-10}"        # every tunnel was closed by a DISCONNECT
+CLEAN_WAIT="${CLEAN_WAIT:-3}"         # every tunnel was closed by a DISCONNECT (and answered)
 CHECK_WAIT="${CHECK_WAIT:-150}"       # most time for sites to reconnect after start
 STOP_LIMIT="${STOP_LIMIT:-120}"       # give up if hamon has not exited by then
 
@@ -101,7 +101,7 @@ sleep "$wait"
 offset=$(( $(stat -c %s "$LOG") + 1 ))
 log "starting $SERVICE"
 sudo systemctl start "$SERVICE" || die "systemctl start failed"
-sleep 5
+sleep 2
 systemctl is-active -q "$SERVICE" || die "$SERVICE not active after start - see hamon.err"
 
 # wait until the new hamon has settled every site (no site still starting),
@@ -109,8 +109,8 @@ systemctl is-active -q "$SERVICE" || die "$SERVICE not active after start - see 
 pid=$(systemctl show "$SERVICE" -p MainPID --value)
 log "waiting for sites to reconnect (at most ${CHECK_WAIT}s)"
 settled=""
-for _ in $(seq 5 5 "$CHECK_WAIT"); do
-  sleep 5
+for _ in $(seq 1 "$CHECK_WAIT"); do
+  sleep 1
   systemctl is-active -q "$SERVICE" || die "$SERVICE died after start - see hamon.err"
   if python3 - "$STATE" "$pid" <<'PY' 2>/dev/null; then
 import json, sys

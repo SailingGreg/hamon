@@ -126,6 +126,7 @@ function cancelPending(name) {
 const getDoc = (hamonConfig) => yaml.load(fs.readFileSync(hamonConfig, 'utf8'));
 
 let sigcnt = 0;
+let shuttingDown = false; // a signal arrived: exit once the last site has stopped
 // deal with signals and exit gracefully
 function sigHandler(signal) {
     let ttype = typeof signal;
@@ -149,11 +150,12 @@ function sigHandler(signal) {
         worker.postMessage({ exit: true });
     }
 
-    // guard as we need to wait for threads to exit
+    // wait for the sites to stop: exit as soon as the last one has (see the
+    // 'exit' handler in startWorker), or after the timeout if one doesn't
     if (threads.size > 0) {
-        // and we set a timer in case systemd only does a SIGTERM
-        let timeout = 450 * threads.size; // 450msec per worker
-        console.log(`Threads outstanding ${threads.size}, setting timeout`)
+        shuttingDown = true
+        let timeout = 450 * threads.size; // 450msec per site
+        console.log(`${useThreads ? 'Threads' : 'Sites'} outstanding ${threads.size}, setting timeout`)
         setTimeout (() => {
             console.log(`Timeout and exiting`)
             process.exit()
@@ -226,7 +228,12 @@ function start_worker(path, influxver, loc, survey, stack, dedupe) {
       const why = pending[loc.name] ? ` (back-off, restart ${failures[loc.name]}`
             + ` in ${backoffDelay(failures[loc.name]) / 60000}min)`
             : (st != null && st.state === 'blocked') ? ` (blocked, ${st.reason})` : ''
-      console.log(`Thread exiting: ${loc.name}${why}, ${threads.size} running...`)
+      // 'Thread' for a worker, 'Site' for one in the main thread (threads: false)
+      console.log(`${worker instanceof InlineWorker ? 'Site' : 'Thread'} exiting: ${loc.name}${why}, ${threads.size} running...`)
+      if (shuttingDown && threads.size === 0) {
+        console.log(`Exiting`)
+        process.exit()
+      }
     })
 
     return (worker);
