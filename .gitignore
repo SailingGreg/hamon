@@ -22,3 +22,5 @@ reference/
 
 # runtime files written by ha-mon (kpipe, site-state.json)
 tmp/
+# Grafana service-account token (prod only) - never commit
+grafana.token

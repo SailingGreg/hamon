@@ -170,19 +170,24 @@ async function readLogs(sites) {
     if (json) return out(JSON.stringify(rows, null, 1) + '\n')
 
     const pad = (v, n) => String(v).padStart(n)
+    const quiet = rows.filter((r) => r.live === 0).map((r) => r.site)
     out(`${'site'.padEnd(14)} ${pad('export', 6)} ${pad('w/DPT', 5)}  ${'rules +/~/='.padEnd(11)} ${pad('live', 5)} ${pad('stored', 6)} ${pad('unmap', 6)} ${pad('device', 7)} ${pad('hamon', 9)}  grade\n`)
-    for (const r of rows) {
+    for (const r of rows.filter((r) => r.live > 0)) {
         out(`${r.site.padEnd(14)} ${pad(r.exported, 6)} ${pad(r.exportDptPct === null ? '-' : r.exportDptPct + '%', 5)}  ` +
             `${`${r.rules.added}/${r.rules.overridden}/${r.rules.named}`.padEnd(11)} ${pad(r.live, 5)} ` +
             `${pad(r.storedPct === null ? '-' : r.storedPct + '%', 6)} ${pad((r.unmappedCapped ? '>=' : '') + r.unmapped.length, 6)} ` +
             `${pad(`${r.deviceInvalid}/${r.deviceLength}`, 7)} ${pad(`${Object.keys(r.hamonGaps).length}/${r.hamonGapsExport}`, 9)}  ${r.grade}\n`)
     }
+    if (quiet.length) out(`\nno live traffic in these logs: ${quiet.join(' ')}\n`)
     out('\ndevice = GAs with invalid data (7FFFh) / wrong length; hamon = live / exported GAs whose DPT hamon or KNXUltimate can\'t store\n')
-    const detail = rows.filter((r) => r.unmapped.length || Object.keys(r.device).length || Object.keys(r.hamonGaps).length)
+    const detail = rows.filter((r) => r.live > 0 && (r.unmapped.length || Object.keys(r.device).length || Object.keys(r.hamonGaps).length))
     for (const r of detail) {
         out(`\n${r.site}\n`)
         if (r.unmapped.length) out(`  unmapped: ${r.unmapped.join(' ')}\n`)
         for (const [ga, d] of Object.entries(r.device)) out(`  device:   ${ga} ${d.invalid ? 'invalid data' : 'wrong length'} x${d.n}\n`)
-        for (const [ga, why] of Object.entries(r.hamonGaps)) out(`  hamon:    ${ga} ${why}\n`)
+        // by DPT: mostly date/time, scene and dimming objects, one line each
+        const byDpt = new Map()
+        for (const [ga, why] of Object.entries(r.hamonGaps)) byDpt.set(why, (byDpt.get(why) || []).concat(ga))
+        for (const [why, gas] of byDpt) out(`  hamon:    ${why}: ${gas.length > 6 ? gas.slice(0, 6).join(' ') + ` +${gas.length - 6}` : gas.join(' ')}\n`)
     }
 })()
