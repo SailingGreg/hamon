@@ -110,3 +110,29 @@ console.log(`write: ${writes} cases (valid encode as knx, invalid refused)`)
     assert.strictEqual(got, 21)
     console.log('read: ok')
 }
+
+// 4. a telegram that can't be stored is reported, with why
+{
+    const cases = [
+        ['DPT9.001', '7fff', /invalid data \(7FFFh\)/],
+        ['DPT6.010', '0000', /doesn't fit DPT6\.010/],
+        ['DPT9.001', '0c1a', null],
+        ['DPT1.001', '01', null],
+    ]
+    for (const [dpt, hex, want] of cases) {
+        const c = new FakeConn()
+        const reported = []
+        const d = new Datapoint({ ga: '1/2/3', dpt }, c)
+        d.on('invalid', (src, buf, reason) => reported.push([src, buf.toString('hex'), reason]))
+        c.emit('event_1/2/3', 'GroupValue_Write', '1.1.77', Buffer.from(hex, 'hex'))
+        if (want === null) {
+            assert.deepStrictEqual(reported, [], `${dpt} ${hex} isn't reported`)
+        } else {
+            assert.strictEqual(reported.length, 1, `${dpt} ${hex} is reported`)
+            assert.strictEqual(reported[0][0], '1.1.77', 'with the sender')
+            assert.match(reported[0][2], want)
+            assert.ok(d.current_value == null, `${dpt} ${hex} isn't stored`)
+        }
+    }
+    console.log('invalid: ok')
+}

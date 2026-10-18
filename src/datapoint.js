@@ -40,16 +40,29 @@ class Datapoint extends EventEmitter {
         this.conn = conn
         conn.on(`event_${this.options.ga}`, (evt, src, buf) => {
             if ((evt === 'GroupValue_Write' || evt === 'GroupValue_Response') && buf) {
-                this.update(this.decode(buf))
+                const value = this.decode(buf)
+                // a telegram that can't be stored: tell the site (it logs it)
+                if (value == null && this.dpt !== null) this.emit('invalid', src, buf, this.invalidReason(buf))
+                this.update(value)
             }
         })
     }
 
+    // why a payload didn't decode
+    invalidReason (buf) {
+        if (this.isInvalid9(buf)) return 'device reports invalid data (7FFFh)'
+        return `payload doesn't fit ${this.dptid} - check the GA's DPT in ETS`
+    }
+
+    // DPT 9: 7FFFh is the spec's 'invalid data' value, not 670760.96
+    // (XKNX rejects it too), so it isn't stored
+    isInvalid9 (buf) {
+        return /^DPT9(\.|$)/.test(this.dptid) && buf.length === 2 && buf.readUInt16BE(0) === 0x7fff
+    }
+
     decode (buf) {
         if (this.dpt === null) return undefined
-        // DPT 9: 7FFFh is the spec's 'invalid data' value, not 670760.96
-        // (XKNX rejects it too), so it isn't stored
-        if (/^DPT9(\.|$)/.test(this.dptid) && buf.length === 2 && buf.readUInt16BE(0) === 0x7fff) return undefined
+        if (this.isInvalid9(buf)) return undefined
         try {
             return DPTLib.fromBuffer(buf, this.dpt)
         } catch (e) {

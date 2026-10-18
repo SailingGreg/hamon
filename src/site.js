@@ -141,6 +141,18 @@ function createSite(location, opts, hooks) {
         return ets.parsexml(configFilePath) || {}
     }
 
+    // a telegram the decoder couldn't store: a device sending invalid data
+    // or a GA typed wrongly in ETS - worth passing on to the site's
+    // integrator. The first per GA, then every 100th with a count
+    const invalidSeen = new Map()
+    function logInvalid(key, ga, src, buf, reason) {
+        const n = (invalidSeen.get(key) || 0) + 1
+        invalidSeen.set(key, n)
+        if (n != 1 && n % 100 != 0) return
+        log.warn('DEVICE %s %s (%s) from %s: %s, payload %s%s', name, key, ga.name, src, reason,
+            buf.toString('hex'), n > 1 ? ` (${n} so far)` : '')
+    }
+
     // build the datapoints the first time the tunnel comes up
     function initDatapoints() {
         let cnt = 0, udefined = 0, remapped = 0, overridden = 0, added = 0
@@ -178,6 +190,7 @@ function createSite(location, opts, hooks) {
             if (DEFAULT_SUBTYPE[ga.dpt] !== undefined) ga.dpt += DEFAULT_SUBTYPE[ga.dpt]
             // construct dp for the group address (still done for undefined DPTs)
             ga.endpoint = new Datapoint({ ga: key, dpt: ga.dpt }, connection)
+            ga.endpoint.on('invalid', (src, buf, reason) => logInvalid(key, ga, src, buf, reason))
             // name and unit from hamon's own table, not the KNX library
             const info = dptInfo(ga.dpt)
             ga.unit = info !== undefined ? info.unit : ''
