@@ -66,7 +66,7 @@ function logSkipped(knxloc, dest, name, type, value) {
   if (n != 1 && n % 100 != 0) return
   const kind = typeof(value) == "number" ? "non-finite" : typeof(value)
   const shown = JSON.stringify(value)
-  logger.info(`DBSKIP ${knxloc} ${dest} (${name}) ${type} ${kind} count=${n} value=${shown === undefined ? String(value) : shown.slice(0, 80)}`)
+  logger.info(`DBSKIP ${knxloc} ${dest} (${name}) ${type} ${kind} count=${n} value=${shown === undefined ? String(value) : shown.slice(0, 80)}`, { site: knxloc })
 }
 
 // write to influxDB; time (a Date) is for a value written after it arrived
@@ -162,7 +162,7 @@ function writeEventsv2(evt, src, dest, knxloc, name, type, value, unit, time) {
       */
     )
     .catch((error) => {
-      logger.error(`Error saving data to InfluxDB! ${error.stack}`)
+      logger.error(`Error saving data to InfluxDB! ${error.stack}`, { site: knxloc })
     })
 }
 
@@ -209,7 +209,7 @@ function writeActionsv2(knxloc, evt, dest, avalue) {
         } ]
     )
     .catch((error) => {
-      logger.error(`Error saving data to InfluxDB actions! ${error.stack}`)
+      logger.error(`Error saving data to InfluxDB actions! ${error.stack}`, { site: knxloc })
     })
 }
 

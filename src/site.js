@@ -75,6 +75,8 @@ const ctime = () => localDate().replace(/T/, ' ').replace(/\..+/, '')
 // connectedBefore, failures, survey, precheck, dedupe (ms, 0 = off) }; hooks: see the top
 function createSite(location, opts, hooks) {
     const { dns, port, config, name, path, influxver, logging, device, phyAddr, secure } = location
+    // everything this site logs goes through its own logger (see logger.js)
+    const log = logger.siteLogger(name)
     const siteStack = opts.stack || location.stack
     const knx = knxstack(siteStack)
     // the stack picks the decoder too: knx decodes/encodes with knx.Datapoint,
@@ -119,7 +121,7 @@ function createSite(location, opts, hooks) {
     }
 
     function handleTimeout(why) {
-        logger.info('%s >>> Timer connection timed out: %s%s', ctime(), name, why ? ` (${why})` : '')
+        log.info('%s >>> Timer connection timed out: %s%s', ctime(), name, why ? ` (${why})` : '')
         finish(hooks.timeout)
     }
 
@@ -129,7 +131,7 @@ function createSite(location, opts, hooks) {
         if (ext === '.knxproj') {
             // config is json no need to parse it - but need to change extn
             const configFile = configFilePath.substring(0, configFilePath.lastIndexOf('.')) + '.json'
-            logger.info(`Loading json intermediate file: ${configFile}`)
+            log.info(`Loading json intermediate file: ${configFile}`)
             return JSON.parse(fs.readFileSync(configFile)).reduce((map, obj) => {
                 map[obj.address] = obj
                 return map
@@ -179,7 +181,7 @@ function createSite(location, opts, hooks) {
             }
             cnt++
         }
-        logger.info('GA for %s: %j (%d undefined/%d remapped/%d overridden)',
+        log.info('GA for %s: %j (%d undefined/%d remapped/%d overridden)',
                     name, cnt, udefined, remapped, overridden)
     }
 
@@ -187,14 +189,14 @@ function createSite(location, opts, hooks) {
         if (!groupAddresses.hasOwnProperty(dest)) return
         const ga = groupAddresses[dest]
         // note use of endpoint.current_value gives the 'decoded' value
-        logger.info('>> %s Event %s %j -> %j (%s - %s) - %j %s %j',
+        log.info('>> %s Event %s %j -> %j (%s - %s) - %j %s %j',
             ctime(), evt, src, dest, ga.name, ga.type, ga.endpoint.current_value, ga.unit,
             typeof (ga.endpoint.current_value))
         // survey (top-level `survey: true` in hamon.yml): when the ETS DPT
         // cannot decode the telegram, log the raw payload so the real DPT can
         // be worked out
         if (opts.survey === true && ga.endpoint.current_value === undefined && Buffer.isBuffer(value)) {
-            logger.info('DBRAW %s %s (%s) %s len=%d hex=%s', name, dest, ga.name, ga.type,
+            log.info('DBRAW %s %s (%s) %s len=%d hex=%s', name, dest, ga.name, ga.type,
                         value.length, value.toString('hex'))
         }
         if (ga.type != undefined && ga.type != '') {
@@ -212,24 +214,26 @@ function createSite(location, opts, hooks) {
             forceTunneling: device == "generic" ? true : false,
             suppress_ack_ldatareq: (device == "loxone" || device == "eibport") ? true : false,
             physAddr: phyAddr,
+            site: name,             // knxultimate only: labels the library's own lines
+            log,                    // knxultimate only: the shim's lines
             secure: secureTunnel,   // knxultimate only; undefined = plain tunnelling
             loglevel: quietRetries ? 'error' : logging,
             handlers: {
                 connected: guard(function () {
-                    logger.info('%s Connected - %s (%d)', ctime(), name, Date.now() - lastErr)
+                    log.info('%s Connected - %s (%d)', ctime(), name, Date.now() - lastErr)
                     hooks.connected() // resets restart back-off
                     clearTimeout(firstConnectHandle)
                     firstConnectHandle = null
                     if (timerHandle != null) {
                         clearTimeout(timerHandle)
                         timerHandle = null
-                        logger.info('%s Timer: clear timer %s', ctime(), name)
+                        log.info('%s Timer: clear timer %s', ctime(), name)
                     }
                     if (!inited) { // only do this once on initial load
                         inited = true
                         initDatapoints()
                         // and then connect to MQTT
-                        mqttClient = MQTTconnect(groupAddresses, connection, location)
+                        mqttClient = MQTTconnect(groupAddresses, connection, location, log)
                     }
                 }),
                 // on event we get src/dest/value
@@ -239,7 +243,7 @@ function createSite(location, opts, hooks) {
                     // a never-connected site retrying after its first give-up fails the same
                     // way each time (knxultimate reports it here, knx didn't): keep it out of
                     // error.log - the first attempt after a start or config change still errors
-                    logger.log(quietRetries ? 'info' : 'error', '%s **** ERROR: %s %j', ctime(), name, connstatus)
+                    log.log(quietRetries ? 'info' : 'error', '%s **** ERROR: %s %j', ctime(), name, connstatus)
                     // the recovery timer runs from the FIRST error since the last
                     // 'connected' and is not re-armed by later ones: a stack that keeps
                     // failing more often than every 15min would otherwise push the
@@ -255,7 +259,7 @@ function createSite(location, opts, hooks) {
     async function start() {
         if (opts.connectedBefore !== true) {
             firstConnectHandle = setTimeout(() => {
-                logger.info('%s: not connected within %d min', name, FIRST_CONNECT_WAIT / 60000)
+                log.info('%s: not connected within %d min', name, FIRST_CONNECT_WAIT / 60000)
                 handleTimeout()
             }, FIRST_CONNECT_WAIT)
         }
@@ -268,7 +272,7 @@ function createSite(location, opts, hooks) {
             // unresolved below
         }
         if (finished) return // stopped while resolving
-        logger.info('KNXnet/IP %s -> %s (stack %s, decoder %s%s%s)', dns, knxAddr, siteStack || 'knx', decoder,
+        log.info('KNXnet/IP %s -> %s (stack %s, decoder %s%s%s)', dns, knxAddr, siteStack || 'knx', decoder,
                     dedupe ? `, dedupe ${opts.dedupe / 1000}s` : '',
                     opts.precheck === true ? ', checking the gateway answers first' : '')
         // unresolved: knx would silently fall back to the multicast default and
@@ -283,7 +287,7 @@ function createSite(location, opts, hooks) {
         try {
             if (secure === true) {
                 secureTunnel = secureOptions(path, { ...location, stack: siteStack })
-                logger.info('%s: KNX Secure tunnel %s (user %d) on gateway %s, %d Data Secure GA(s)', name,
+                log.info('%s: KNX Secure tunnel %s (user %d) on gateway %s, %d Data Secure GA(s)', name,
                     secureTunnel.tunnelIA, secureTunnel.userId, secureTunnel.gateway,
                     Object.keys(secureTunnel.groupKeys).length)
             }
@@ -331,7 +335,7 @@ function createSite(location, opts, hooks) {
             if (open) {
                 connection.on('disconnected', () => {
                     clearTimeout(t)
-                    console.log(`[${name}] Disconnected, closed connection gracefully.`)
+                    log.info('Disconnected, closed connection gracefully: %s', name)
                     resolve()
                 })
             }
@@ -353,7 +357,7 @@ function createSite(location, opts, hooks) {
 
     // an exit asked for by service.js (config change, kpipe, shutdown): no hook
     function exit() {
-        logger.info('Exiting - doing cleanup for: %s', name)
+        log.info('Exiting - doing cleanup for: %s', name)
         finished = true
         return stop()
     }

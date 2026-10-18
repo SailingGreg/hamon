@@ -100,7 +100,7 @@ function writeEvents(evt, src, dest, knxloc, name, type, value, unit) {
       }
     )
     .catch((error) => {
-      logger.error(`Error saving data to InfluxDB! ${error.stack}`)
+      logger.error(`Error saving data to InfluxDB! ${error.stack}`, { site: knxloc })
     })
 }
 
@@ -146,7 +146,7 @@ function writeActions(knxloc, evt, dest, avalue) {
       }
     )
     .catch((error) => {
-      logger.error(`Error saving data to InfluxDB actions! ${error.stack}`)
+      logger.error(`Error saving data to InfluxDB actions! ${error.stack}`, { site: knxloc })
     })
 }
 

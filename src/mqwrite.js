@@ -14,12 +14,13 @@ const gadRegExp = new RegExp(
 )
 
 // one client per site, returned to the caller (site.js), which passes it to
-// mqdisconnect() - sites may share this module in one thread
-function MQTTconnect(groupAddresses, connection, location) {
+// mqdisconnect() - sites may share this module in one thread, so it logs
+// through the site's logger (log)
+function MQTTconnect(groupAddresses, connection, location, log = logger.siteLogger(location?.name)) {
   const mqttClient = mqtt.connect(MQTTBROKERIP)
 
     mqttClient.on('connect', function () {
-    console.log(`MQTT connected to ${location?.name}`)
+    log.info(`MQTT connected to ${location?.name}`)
     mqttClient.subscribe(`${topicPrefix}/${location.name}/+/+/+`)
     mqttClient.subscribe(`${topicPrefix}/${location.name}/+/+/+/+`)
   })
@@ -27,7 +28,7 @@ function MQTTconnect(groupAddresses, connection, location) {
   mqttClient.on('message', function (topic, message) {
     let msg = message.toString('utf8')
 
-    logger.info(`MQTT Topic: ${topic}, message: <${msg}>`)
+    log.info(`MQTT Topic: ${topic}, message: <${msg}>`)
 
     if (topic.startsWith('knx')) {
       let gadArray = gadRegExp.exec(topic)
@@ -63,7 +64,7 @@ function MQTTconnect(groupAddresses, connection, location) {
 
         if (cmd == 'write') {
           if (typeof value === 'number' && Number.isNaN(value)) {
-            logger.error(
+            log.error(
               'Ignoring write to %s: payload %j invalid for dpt %s',
               gad,
               msg,
@@ -72,13 +73,13 @@ function MQTTconnect(groupAddresses, connection, location) {
           } else if (writeError(groupAddresses[gad].dpt, value)) {
             // checked here as both KNX libraries would send some of these as a
             // different value rather than refuse them
-            logger.error('Ignoring write to %s: %s', gad, writeError(groupAddresses[gad].dpt, value))
+            log.error('Ignoring write to %s: %s', gad, writeError(groupAddresses[gad].dpt, value))
           } else {
             try {
               // ref endpoint
               groupAddresses[gad].endpoint.write(value)
             } catch (err) {
-              logger.error(
+              log.error(
                 'Could not write message %j to group address %s, err: %s',
                 err.message,
                 gad,
@@ -98,10 +99,10 @@ function MQTTconnect(groupAddresses, connection, location) {
             if (dptMain(groupAddresses[gad].dpt) !== 1) throw new Error(`not a DPT1 GA (${groupAddresses[gad].dpt})`)
             groupAddresses[gad].endpoint.write(cmd == 'on')
           } catch (err) {
-            logger.error('Could not %s group address %s, err: %s', cmd, gad, err)
+            log.error('Could not %s group address %s, err: %s', cmd, gad, err)
           }
         } else {
-          logger.info('Invalid command %s', cmd)
+          log.info('Invalid command %s', cmd)
         }
       }
     }

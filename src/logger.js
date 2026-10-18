@@ -22,4 +22,9 @@ const logger = winston.createLogger({
     ]
   })
   
+  // a site's own logger: every line it writes carries {"site": name}, so a
+  // site's lines can be told apart however the sites run (a worker each, or all
+  // in one thread). The message text is unchanged, so greps of it still work
+  logger.siteLogger = (name) => logger.child({ site: name })
+
   module.exports = logger

@@ -4,7 +4,7 @@
  * connection.js, mqwrite.js and knx.Datapoint only use a small part of a knx
  * Connection, so that is all this provides:
  *
- *   Connection({ ipAddr, ipPort, physAddr, suppress_ack_ldatareq, loglevel,
+ *   Connection({ ipAddr, ipPort, physAddr, suppress_ack_ldatareq, loglevel, site, log,
  *                secure, handlers: { connected, event, error } })
  *   .state            'idle' while connected (what connection.js tests for)
  *   .conntime         set while connected (knx.Datapoint autoread checks it)
@@ -52,6 +52,25 @@ const logger = require('./logger')
 // hamon already logs itself - so 'info' maps to 'warn'
 const LOGLEVEL = { error: 'error', warn: 'warn', info: 'warn', debug: 'debug', trace: 'trace' }
 
+// knxultimate's `loglevel` option sets the level of every logger in the
+// process (KnxLog.setLogLevel), so with all sites in one thread each new client
+// would reset every other site's level - a quiet ('error') or 'debug' site
+// would set it for all. Instead the shared library loggers (dptlib, protocol)
+// are set to 'warn' once, and each client's own logger - labelled with the site
+// name through `setPrefix` - gets the site's level on its own
+let sharedLevelSet = false
+function setSharedLevel() {
+    if (sharedLevelSet) return
+    sharedLevelSet = true
+    require('knxultimate/build/KnxLog').setLogLevel('warn')
+}
+function setClientLevel(client, level) {
+    const log = client.sysLogger
+    if (!log) return
+    log.level = level
+    for (const t of log.transports) t.level = level
+}
+
 // knxultimate's messages for a secure session the gateway or we refused
 // 6.0.x says 'session rejected', 6.2+ 'rejected the session' (SESSION_STATUS 2)
 const SECURE_AUTH_FAILED = /authentication failed|MAC verification failed|session rejected|rejected the session/i
@@ -60,12 +79,14 @@ class UltimateConnection extends EventEmitter {
     constructor(options) {
         super()
         const { KNXClient } = require('knxultimate')
+        setSharedLevel()
 
         this.state = 'connecting'
         this.closing = false   // Disconnect() called
         this.errorForwarded = false   // first error of this outage passed on
         this.errorsSuppressed = 0
         this.options = options
+        this.log = options.log || logger   // the site's logger (site.js)
 
         if (typeof options.handlers === 'object') {
             for (const [key, fn] of Object.entries(options.handlers)) {
@@ -106,7 +127,7 @@ class UltimateConnection extends EventEmitter {
             if (!local || !this.client || this.closing) return
             const clientOptions = this.client._options
             if (clientOptions.localIPAddress !== local) {
-                logger.warn('%s local address %s -> %s', this.options.ipAddr,
+                this.log.warn('%s local address %s -> %s', this.options.ipAddr,
                     clientOptions.localIPAddress, local)
                 clientOptions.localIPAddress = local
             }
@@ -135,7 +156,8 @@ class UltimateConnection extends EventEmitter {
             physAddr: options.physAddr || '15.15.15',   // knx's default; secure: the gateway assigns it
             localIPAddress,
             suppress_ack_ldatareq: !!options.suppress_ack_ldatareq,
-            loglevel: LOGLEVEL[options.loglevel] || 'error',
+            loglevel: '',   // not process-wide: set on this client below
+            setPrefix: options.site || 'KNXEngine',   // labels the library's lines
             autoReconnect: true,   // knx's FSM reconnects by itself too
             ...(secure ? {
                 isSecureKNXEnabled: true,
@@ -149,6 +171,7 @@ class UltimateConnection extends EventEmitter {
                 },
             } : {}),
         })
+        setClientLevel(this.client, LOGLEVEL[options.loglevel] || 'error')
         if (secure && Object.keys(secure.groupKeys).length > 0) this.groupKeys = secure.groupKeys
 
         this.client.on('connected', () => {
@@ -157,7 +180,7 @@ class UltimateConnection extends EventEmitter {
             this.conntime = Date.now()
             delete this.lastSeq   // a new tunnel starts its sequence again
             if (this.errorsSuppressed > 0) {
-                logger.warn('%s back after %d more connection error(s) not logged',
+                this.log.warn('%s back after %d more connection error(s) not logged',
                     this.options.ipAddr, this.errorsSuppressed)
             }
             this.errorForwarded = false
@@ -173,7 +196,7 @@ class UltimateConnection extends EventEmitter {
             // synchronously: the library schedules its reconnect right after this
             if (options.secure && SECURE_AUTH_FAILED.test(message) && this.client._options.autoReconnect) {
                 this.client._options.autoReconnect = false
-                logger.error('%s KNX Secure: %s - not retrying until the worker restarts; check the values from the ETS project',
+                this.log.error('%s KNX Secure: %s - not retrying until the worker restarts; check the values from the ETS project',
                     this.options.ipAddr, message)
             }
             // a connection-level error is followed at once by a disconnect, so
@@ -181,7 +204,7 @@ class UltimateConnection extends EventEmitter {
             setImmediate(() => {
                 if (this.closing) return
                 if (this.client.isConnected()) {
-                    logger.warn('%s %s (still connected)', this.options.ipAddr, message)
+                    this.log.warn('%s %s (still connected)', this.options.ipAddr, message)
                     return
                 }
                 if (this.errorForwarded) {
@@ -224,11 +247,11 @@ class UltimateConnection extends EventEmitter {
             }
         }).map(([ga]) => ga)
         if (missing.length > 0) {
-            logger.error('%s KNX Secure: %d of %d Data Secure key(s) not in knxultimate\'s key map (%s) - those GAs won\'t decode; ' +
+            this.log.error('%s KNX Secure: %d of %d Data Secure key(s) not in knxultimate\'s key map (%s) - those GAs won\'t decode; ' +
                 'knxultimate internals may have changed', this.options.ipAddr, missing.length, all.length,
                 missing.slice(0, 5).join(', ') + (missing.length > 5 ? ', ...' : ''))
         } else if (!this.groupKeysChecked) {
-            logger.info('%s KNX Secure: %d Data Secure key(s) in place', this.options.ipAddr, all.length)
+            this.log.info('%s KNX Secure: %d Data Secure key(s) in place', this.options.ipAddr, all.length)
         }
         this.groupKeysChecked = true
     }
@@ -313,7 +336,7 @@ class UltimateConnection extends EventEmitter {
 
     // not an 'error' event: connection.js treats those as connection trouble
     dropped(what, grpaddr, err) {
-        logger.warn('%s %s %s dropped (%s): %s', this.options.ipAddr, what, grpaddr,
+        this.log.warn('%s %s %s dropped (%s): %s', this.options.ipAddr, what, grpaddr,
             this.state, (err && err.message) || err)
     }
 
