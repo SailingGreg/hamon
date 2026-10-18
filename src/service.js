@@ -177,6 +177,19 @@ process.on('SIGHUP', sigHandler);
 let originalDoc = {};
 let orgPath = "";
 
+// the hamon.yml locations last applied, for siblingsOf
+let currentLocs = {}
+
+// other enabled sites on the same gateway (one bus, two ETS projects): a site
+// doesn't report their GAs as unmapped
+function siblingsOf(loc) {
+    const port = (l) => String(l.port || 3671)
+    return Object.values(currentLocs)
+        .filter((o) => o && o.name !== loc.name && o.enabled !== false && o.config
+                && String(o.dns) === String(loc.dns) && port(o) === port(loc))
+        .map((o) => ({ name: o.name, config: o.config }))
+}
+
 function start_worker(path, influxver, loc, survey, stack, dedupe) {
 
     loc["path"] = path; // add path
@@ -198,7 +211,8 @@ function start_worker(path, influxver, loc, survey, stack, dedupe) {
                    failures: failures[loc.name] || 0,
                    survey: survey === true, // top-level `survey: true` in hamon.yml
                    stack: effectiveStack(loc.stack, stack), // site's, else top-level, else knx
-                   dedupe: effectiveDedupe(loc.dedupe, dedupe) } // ms: site's, else top-level, else 0 (off)
+                   dedupe: effectiveDedupe(loc.dedupe, dedupe), // ms: site's, else top-level, else 0 (off)
+                   siblings: siblingsOf(loc) }
     const worker = useThreads ? new Worker(path + './src/connection.js', { workerData: data })
                               : new InlineWorker({ ...loc }, data)
     threads.add(worker)
@@ -342,6 +356,7 @@ function restart (name) {
 
 // called with current doc for config file
 async function ConnectionService(firstrun, path, doc) {
+  currentLocs = doc.locations || {}
   // note for restart
   //orgDoc = doc;
 

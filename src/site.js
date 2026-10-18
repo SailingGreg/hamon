@@ -125,13 +125,13 @@ function createSite(location, opts, hooks) {
         finish(hooks.timeout)
     }
 
-    function loadGroupAddresses() {
-        const configFilePath = path + 'config/' + config
-        const ext = config.substring(config.lastIndexOf('.'), config.length)
+    function loadGroupAddresses(cfg = config) {
+        const configFilePath = path + 'config/' + cfg
+        const ext = cfg.substring(cfg.lastIndexOf('.'), cfg.length)
         if (ext === '.knxproj') {
             // config is json no need to parse it - but need to change extn
             const configFile = configFilePath.substring(0, configFilePath.lastIndexOf('.')) + '.json'
-            log.info(`Loading json intermediate file: ${configFile}`)
+            if (cfg === config) log.info(`Loading json intermediate file: ${configFile}`)
             return JSON.parse(fs.readFileSync(configFile)).reduce((map, obj) => {
                 map[obj.address] = obj
                 return map
@@ -206,8 +206,36 @@ function createSite(location, opts, hooks) {
                     name, cnt, udefined, remapped, overridden, added)
     }
 
+    // a telegram hamon can't store because its GA isn't mapped: not in the
+    // export (nor added by a dptmappings rule), or without a DPT. Logged once
+    // per GA per start, so a GA added to the project after the export was
+    // taken shows up without a capture. GAs a site sharing this gateway
+    // stores are left out, and so are reads (no value)
+    const UNMAPPED_MAX = 100
+    const unmappedSeen = new Set()
+    let unmappedLogged = 0
+    let siblingGas = null
+    function loadSiblingGas() {
+        const gas = new Set()
+        for (const sib of opts.siblings || []) {
+            try { Object.keys(loadGroupAddresses(sib.config)).forEach((g) => gas.add(g)) } catch (e) { }
+            for (const rule of addressRules(sib.name)) if (rule.dpt !== undefined) gas.add(rule.ga)
+        }
+        return gas
+    }
+    function logUnmapped(evt, dest, src, value, why) {
+        if (evt === 'GroupValue_Read' || unmappedSeen.has(dest)) return
+        unmappedSeen.add(dest)
+        if (siblingGas === null) siblingGas = loadSiblingGas()
+        if (siblingGas.has(dest) || unmappedLogged >= UNMAPPED_MAX) return
+        unmappedLogged++
+        const payload = Buffer.isBuffer(value) ? value.toString('hex') : JSON.stringify(value)
+        log.warn('UNMAPPED %s %s from %s: %s, payload %s%s', name, dest, src, why, payload,
+            unmappedLogged === UNMAPPED_MAX ? ` (${UNMAPPED_MAX} GAs - no more logged until restart)` : '')
+    }
+
     function onEvent(evt, src, dest, value) {
-        if (!groupAddresses.hasOwnProperty(dest)) return
+        if (!groupAddresses.hasOwnProperty(dest)) return logUnmapped(evt, dest, src, value, 'not in the ETS export')
         const ga = groupAddresses[dest]
         // note use of endpoint.current_value gives the 'decoded' value
         log.info('>> %s Event %s %j -> %j (%s - %s) - %j %s %j',
@@ -224,6 +252,8 @@ function createSite(location, opts, hooks) {
             const args = [evt, src, dest, name, ga.name, ga.type, ga.endpoint.current_value, ga.unit]
             if (dedupe) dedupe.push(dest, ga.endpoint.current_value, args)
             else writeEvent(...args)
+        } else {
+            logUnmapped(evt, dest, src, value, `no DPT for "${ga.name}"`)
         }
     }
 
