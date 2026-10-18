@@ -292,7 +292,7 @@ function createSite(location, opts, hooks) {
                     Object.keys(secureTunnel.groupKeys).length)
             }
             groupAddresses = loadGroupAddresses()
-            loadmapping(path) // initialise the str to dtp mappings
+            loadmapping(path, name) // initialise the str to dtp mappings
         } catch (err) {
             return finish(hooks.error, err)
         }

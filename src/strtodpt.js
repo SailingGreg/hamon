@@ -29,15 +29,16 @@ function splitQuoted(line) {
     return fields;
 }
 
-function loadmapping(loc) {
-
-    // initalise - load the mapping strings - dpts = new strtpdpt(loc)
-    //constructor (loc) {
-        //this.lines = [];
+// load the rules, replacing any loaded before: each site start reloads the
+// file (so a kpipe picks up an edit), and with every site in one thread
+// (threads: false) appending would add another copy of every rule each time.
+// site: the site loading them, for the hamon.log line
+function loadmapping(loc, site) {
 
         // add try
-        console.log(loc + fname);
         let data = fs.readFileSync(loc + fname, 'utf-8');
+        lines = [];
+        addrRules = [];
 
         let ll = data.split('\n');
         //console.log (ll); // this is a Buffer()
@@ -88,7 +89,7 @@ function loadmapping(loc) {
 
         }
 
-        //console.log (this.lines);
+        console.log(`${site ? `[${site}] ` : ''}${loc + fname}: ${lines.length} name rules, ${addrRules.length} address rules`);
 }
 
 
