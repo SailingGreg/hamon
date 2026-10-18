@@ -45,6 +45,8 @@
 
 const { EventEmitter } = require('events')
 const dgram = require('dgram')
+const { AsyncLocalStorage } = require('async_hooks')
+const { isMainThread } = require('worker_threads')
 const DPTLib = require('knx/src/dptlib')
 const logger = require('./logger')
 
@@ -63,6 +65,27 @@ function setSharedLevel() {
     if (sharedLevelSet) return
     sharedLevelSet = true
     require('knxultimate/build/KnxLog').setLogLevel('warn')
+}
+// The shared loggers (NPDU, LDATAIND, dptlib...) don't know which client
+// called them. Each site's client is started inside siteContext.run(site), so
+// its socket and timers - and so every line logged while handling its packets -
+// carry the site name; the shared loggers put it in front of the message.
+// Only in the main thread: a worker's lines are already prefixed [site]
+const siteContext = new AsyncLocalStorage()
+const clientLoggers = new Set()   // each client's own (setPrefix) logger
+function labelSharedLoggers() {
+    if (!isMainThread) return
+    const KnxLog = require('knxultimate/build/KnxLog')
+    const { format } = require('winston')
+    for (const [name, lg] of KnxLog.default) {
+        if (lg.siteLabelled || clientLoggers.has(name)) continue
+        lg.siteLabelled = true
+        lg.format = format.combine(format((info) => {
+            const site = siteContext.getStore()
+            if (site && typeof info.message === 'string') info.message = `[${site}] ${info.message}`
+            return info
+        })(), lg.format)
+    }
 }
 function setClientLevel(client, level) {
     const log = client.sysLogger
@@ -94,7 +117,7 @@ class UltimateConnection extends EventEmitter {
             }
         }
 
-        this.localAddress((local) => this.start(KNXClient, local))
+        siteContext.run(options.site, () => this.localAddress((local) => this.start(KNXClient, local)))
     }
 
     // knxultimate picks its local address from the first suitable interface,
@@ -172,6 +195,8 @@ class UltimateConnection extends EventEmitter {
             } : {}),
         })
         setClientLevel(this.client, LOGLEVEL[options.loglevel] || 'error')
+        if (this.client.sysLogger) clientLoggers.add(this.client.sysLogger.module)
+        labelSharedLoggers()
         if (secure && Object.keys(secure.groupKeys).length > 0) this.groupKeys = secure.groupKeys
 
         this.client.on('connected', () => {
