@@ -49,7 +49,8 @@ function loadmapping(loc, site) {
             if ((line[0] == "#") || (line.length == 0)) continue;
 
             // "location","@<ga>",<dpt>[,override[,"name"]] - an exact group
-            // address; site-specific, so a location is required
+            // address; site-specific, so a location is required. With a dpt
+            // it also adds a GA the ETS export doesn't have
             let fields = splitQuoted(line.replace(/\r$/, ""));
             if (fields.length > 2 && fields[1].startsWith("@")) {
                 if (fields[0].length == 0) {
@@ -146,8 +147,14 @@ function mapaddress (loc, ga) {
     return addrRules.find(rule => rule.loc == loc && rule.ga == ga);
 }
 
+// a location's exact-address rules
+function addressRules (loc) {
+    return addrRules.filter(rule => rule.loc == loc);
+}
+
 module.exports.mapstring = mapstring;
 module.exports.mapaddress = mapaddress;
+module.exports.addressRules = addressRules;
 module.exports.loadmapping = loadmapping;
 //exports.strtodpt = strtodpt;
 //export { strtodpt };

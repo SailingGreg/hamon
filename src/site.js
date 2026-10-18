@@ -24,7 +24,7 @@ const logger = require('./logger')
 const { writeEvents } = require('./db')
 const { writeEventsv2 } = require('./dbv2')
 const { MQTTconnect, mqdisconnect } = require('./mqwrite')
-const { loadmapping, mapstring, mapaddress } = require('./strtodpt')
+const { loadmapping, mapstring, mapaddress, addressRules } = require('./strtodpt')
 const { dptInfo } = require('./dptnames')
 const { secureOptions } = require('./secrets')
 const { describe } = require('./knxdesc')
@@ -143,7 +143,15 @@ function createSite(location, opts, hooks) {
 
     // build the datapoints the first time the tunnel comes up
     function initDatapoints() {
-        let cnt = 0, udefined = 0, remapped = 0, overridden = 0
+        let cnt = 0, udefined = 0, remapped = 0, overridden = 0, added = 0
+        // an exact-address rule with a dpt adds a GA the ETS export doesn't
+        // have (e.g. added to the project after the export); the loop below
+        // then applies the rule to it like any other
+        for (const rule of addressRules(name)) {
+            if (rule.dpt === undefined || groupAddresses.hasOwnProperty(rule.ga)) continue
+            groupAddresses[rule.ga] = { name: rule.name || rule.ga, dpt: undefined }
+            added++
+        }
         for (const key in groupAddresses) {
             if (!groupAddresses.hasOwnProperty(key)) continue
             const ga = groupAddresses[key]
@@ -181,8 +189,8 @@ function createSite(location, opts, hooks) {
             }
             cnt++
         }
-        log.info('GA for %s: %j (%d undefined/%d remapped/%d overridden)',
-                    name, cnt, udefined, remapped, overridden)
+        log.info('GA for %s: %j (%d undefined/%d remapped/%d overridden/%d added)',
+                    name, cnt, udefined, remapped, overridden, added)
     }
 
     function onEvent(evt, src, dest, value) {
