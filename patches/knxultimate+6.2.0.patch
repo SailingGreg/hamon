@@ -1,0 +1,28 @@
+diff --git a/node_modules/knxultimate/build/protocol/cEMI/NPDU.js b/node_modules/knxultimate/build/protocol/cEMI/NPDU.js
+index c455ca5..2e20771 100644
+--- a/node_modules/knxultimate/build/protocol/cEMI/NPDU.js
++++ b/node_modules/knxultimate/build/protocol/cEMI/NPDU.js
+@@ -65,6 +65,9 @@ class NPDU {
+         return 3 + this._data.length;
+     }
+     get action() {
++        if (this.controlOnly) {
++            return -1;
++        }
+         return ((this.apci & 0xc0) >> 6) | ((this.tpci & 0x3) << 2);
+     }
+     set action(action) {
+@@ -129,6 +132,13 @@ class NPDU {
+         catch (error) {
+             sysLogger.error(`createFromBuffer: error tpci: ${error.message}`);
+         }
++        // npduLength 0 = T_Connect/T_Disconnect/T_ACK/T_NAK: transport control
++        // only, there is no APCI byte to read
++        if (npduLength === 0) {
++            const npdu = new NPDU(tpci, 0, null);
++            npdu.controlOnly = true;
++            return npdu;
++        }
+         try {
+             apci = buffer.readUInt8(offset++);
+         }

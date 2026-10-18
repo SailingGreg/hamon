@@ -266,6 +266,8 @@ class UltimateConnection extends EventEmitter {
     indication(packet, echoed) {
         const cemi = packet && packet.cEMIMessage
         if (echoed || !cemi || !cemi.npdu) return   // knx doesn't echo our own writes either
+        // device-to-device traffic (an ETS or visualisation scan): not group data
+        if (cemi.control && cemi.control.addressType !== 1) return
 
         // a repeat of the last indication (our ACK was lost) - already passed on.
         // Only an equal number is a repeat: the library ACKs everything, so any
