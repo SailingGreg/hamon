@@ -47,6 +47,9 @@ class Datapoint extends EventEmitter {
 
     decode (buf) {
         if (this.dpt === null) return undefined
+        // DPT 9: 7FFFh is the spec's 'invalid data' value, not 670760.96
+        // (XKNX rejects it too), so it isn't stored
+        if (/^DPT9(\.|$)/.test(this.dptid) && buf.length === 2 && buf.readUInt16BE(0) === 0x7fff) return undefined
         try {
             return DPTLib.fromBuffer(buf, this.dpt)
         } catch (e) {

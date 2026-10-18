@@ -62,7 +62,9 @@ for (const dpt of DPTS) {
     for (const buf of bufs) {
         ca.emit('event_1/2/3', 'GroupValue_Write', '1.1.1', buf)
         cb.emit('event_1/2/3', 'GroupValue_Write', '1.1.1', buf)
-        assert.deepStrictEqual(stored(b.current_value), stored(a.current_value),
+        // DPT 9's invalid-data value: knx gives 670760.96, hamon stores nothing
+        const invalid9 = dpt.startsWith('DPT9') && buf.length === 2 && buf.readUInt16BE(0) === 0x7fff
+        assert.deepStrictEqual(stored(b.current_value), invalid9 ? stored(undefined) : stored(a.current_value),
             `${dpt} ${buf.toString('hex')}: knx ${a.current_value} knxultimate ${b.current_value}`)
         checked++
     }
