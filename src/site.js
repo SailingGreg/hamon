@@ -335,7 +335,7 @@ function createSite(location, opts, hooks) {
             if (open) {
                 connection.on('disconnected', () => {
                     clearTimeout(t)
-                    log.info('Disconnected, closed connection gracefully: %s', name)
+                    console.log(`[${name}] Disconnected, closed connection gracefully.`)
                     resolve()
                 })
             }

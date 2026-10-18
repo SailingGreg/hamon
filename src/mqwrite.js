@@ -20,7 +20,7 @@ function MQTTconnect(groupAddresses, connection, location, log = logger.siteLogg
   const mqttClient = mqtt.connect(MQTTBROKERIP)
 
     mqttClient.on('connect', function () {
-    log.info(`MQTT connected to ${location?.name}`)
+    console.log(`MQTT connected to ${location?.name}`)
     mqttClient.subscribe(`${topicPrefix}/${location.name}/+/+/+`)
     mqttClient.subscribe(`${topicPrefix}/${location.name}/+/+/+/+`)
   })
