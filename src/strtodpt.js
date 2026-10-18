@@ -147,6 +147,17 @@ function mapaddress (loc, ga) {
     return addrRules.find(rule => rule.loc == loc && rule.ga == ga);
 }
 
+// the dptmappings lines a site uses - its own and the shared ("") ones - so
+// service.js can restart just the sites an edit affects. '' if no file
+function mappingSignature (loc, site) {
+    let data
+    try { data = fs.readFileSync(loc + fname, 'utf-8') } catch (e) { return '' }
+    return data.split('\n').map(l => l.replace(/\r$/, ''))
+        .filter(l => l.length > 0 && l[0] != '#')
+        .filter(l => { const owner = splitQuoted(l)[0]; return owner == '' || owner == site })
+        .join('\n');
+}
+
 // a location's exact-address rules
 function addressRules (loc) {
     return addrRules.filter(rule => rule.loc == loc);
@@ -155,6 +166,7 @@ function addressRules (loc) {
 module.exports.mapstring = mapstring;
 module.exports.mapaddress = mapaddress;
 module.exports.addressRules = addressRules;
+module.exports.mappingSignature = mappingSignature;
 module.exports.loadmapping = loadmapping;
 //exports.strtodpt = strtodpt;
 //export { strtodpt };

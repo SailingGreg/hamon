@@ -8,7 +8,7 @@ const assert = require('assert')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { loadmapping, mapaddress, addressRules } = require('../src/strtodpt')
+const { loadmapping, mapaddress, addressRules, mappingSignature } = require('../src/strtodpt')
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'addrrules-')) + '/'
 fs.writeFileSync(dir + 'dptmappings.txt', [
@@ -39,6 +39,19 @@ checks++
 const exportGas = { '1/2/4': { name: 'In export', dpt: 'DPT5.001' } }
 const added = a.filter((r) => r.dpt !== undefined && !exportGas.hasOwnProperty(r.ga)).map((r) => r.ga)
 assert.deepStrictEqual(added, ['1/2/3'], 'adds the missing GA with a DPT, not the name-only rule or one already exported')
+checks++
+
+// service.js restarts a running site when the lines it uses change
+const before = { a: mappingSignature(dir, 'site-a'), b: mappingSignature(dir, 'site-b'), c: mappingSignature(dir, 'site-c') }
+fs.appendFileSync(dir + 'dptmappings.txt', '"site-a","@1/2/6",DPT9.001\n# a comment\n')
+assert.notStrictEqual(mappingSignature(dir, 'site-a'), before.a, "site-a's own new rule changes its signature")
+assert.strictEqual(mappingSignature(dir, 'site-b'), before.b, "site-b is unaffected by site-a's rule or a comment")
+checks += 2
+fs.appendFileSync(dir + 'dptmappings.txt', '"","Humidity",DPT9.007\n')
+assert.notStrictEqual(mappingSignature(dir, 'site-c'), before.c, 'a shared rule changes every site')
+assert.notStrictEqual(mappingSignature(dir, 'site-b'), before.b, 'a shared rule changes every site')
+checks += 2
+assert.strictEqual(mappingSignature(dir + 'missing/', 'site-a'), '', 'no file')
 checks++
 
 fs.rmSync(dir, { recursive: true })

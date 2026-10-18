@@ -13,6 +13,7 @@ const logger = require('./logger')
 const effectiveStack = require('./knxstack').effective
 const { SiteState, fingerprint, needsPrecheck, CHANGE_FIELDS } = require('./sitestate')
 const effectiveDedupe = require('./dedupe').effective
+const { mappingSignature } = require('./strtodpt')
 
 // sites run one per worker thread (the default), or all in this thread with
 // the top-level `threads: false` in hamon.yml. A feature flag that can be
@@ -386,12 +387,16 @@ async function ConnectionService(firstrun, path, doc) {
             // site: a blocked site isn't re-checked, one in back-off waits on
             const dedupeChanged = effectiveDedupe(oldLoc.dedupe, originalDoc.dedupe)
                     != effectiveDedupe(loc.dedupe, doc.dedupe)
-            if (configChanged || ((modeChanged || dedupeChanged) && running)) {
+            // and so does a change to the dptmappings lines it uses
+            const mappingChanged = oldLoc.mapsig !== undefined
+                    && oldLoc.mapsig != mappingSignature(path, loc.name)
+            if (configChanged || ((modeChanged || dedupeChanged || mappingChanged) && running)) {
                 // restart so terminate and start
                 let diff = stats.mtimeMs - oldLoc["mtime"];
                 logger.info(configChanged ? `Change so restarting: ${loc.name} ${diff}`
                             : modeChanged ? `Restarting in the new threads mode: ${loc.name}`
-                            : `Restarting with dedupe ${effectiveDedupe(loc.dedupe, doc.dedupe) / 1000}s: ${loc.name}`)
+                            : dedupeChanged ? `Restarting with dedupe ${effectiveDedupe(loc.dedupe, doc.dedupe) / 1000}s: ${loc.name}`
+                            : `Restarting with changed dptmappings: ${loc.name}`)
                 if (configChanged) {
                     cancelPending(loc.name);
                     failures[loc.name] = 0;
@@ -471,8 +476,9 @@ async function ConnectionService(firstrun, path, doc) {
         }
     }
 
-    // note the current config file stamp
+    // note the current config file stamp, and the dptmappings lines it uses
     loc["mtime"] = stats.mtimeMs;
+    loc["mapsig"] = mappingSignature(path, loc.name);
     //console.log("Loc ", loc);
   }
   // sites taken out of hamon.yml drop out of the state file
@@ -544,7 +550,13 @@ async function runService(path, hamonConfig) {
   // a save is how a blocked site gets re-checked
   const RELOAD_GAP = 15 * 1000
   let deferred = null
-  fs.watchFile(hamonConfig, function (curr, present) {
+  // dptmappings.txt is watched too: a reload restarts only the running sites
+  // whose lines in it changed (their own, or a shared "" rule)
+  const changed = (file) => function (curr, prev) {
+        if (file != 'hamon.yml') {   // hamon.yml: any change reloads, as before
+            if (curr.mtimeMs == prev.mtimeMs) return
+            logger.info(`${file} changed`)
+        }
         d = new Date().getTime(); // refresh time
         logger.info("runTime %d -> %d", d, last_time);
         if (d > (last_time + RELOAD_GAP)) {
@@ -552,13 +564,15 @@ async function runService(path, hamonConfig) {
         }
         if (deferred == null) {
             const wait = last_time + RELOAD_GAP - d + 100;
-            logger.info(`hamon.yml changed ${d - last_time}ms after the last reload - applying it in ${wait}ms`)
+            logger.info(`${file} changed ${d - last_time}ms after the last reload - applying it in ${wait}ms`)
             deferred = setTimeout(() => {
                 deferred = null;
                 reload();
             }, wait);
         }
-  })
+  }
+  fs.watchFile(hamonConfig, changed('hamon.yml'))
+  fs.watchFile(path + 'dptmappings.txt', changed('dptmappings.txt'))
 
   if (firstRun) {
     firstRun = false
