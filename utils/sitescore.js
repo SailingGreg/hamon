@@ -4,10 +4,16 @@
  * dptmappings rules it needed, the live GAs it stores, and the problems the
  * logs report. Run from the hamon directory on the server.
  *
- *   node utils/sitescore.js [--json] [--yml hamon.yml] [combined.log ...]
+ *   node utils/sitescore.js [--json] [--yml hamon.yml] [--days N] [combined.log ...]
  *
  * Logs default to src/combined.log (rotated .gz files are fine). Only event
  * lines labelled with a site ("site":"...") count towards the live GAs.
+ *
+ * --days N scores only the last N days, so weekly runs cover the same length
+ * of time: without log files it reads src/combined.log and the rotated
+ * src/combined.log-YYYYMMDD.gz files that can hold that window. Event lines
+ * carry a time; UNMAPPED and DEVICE lines don't, and take the time of the last
+ * event line before them. The header says which span the logs actually cover.
  *
  * Columns, one row per site:
  *   export   GAs in the ETS export, and the share that have a DPT there
@@ -39,14 +45,35 @@ const kxu = require('knxultimate/build/dptlib')
 const DEFAULT_SUBTYPE = { DPT1: '.001', DPT3: '.007', DPT5: '.001', DPT7: '.001', DPT8: '.001', DPT9: '.001', DPT18: '.001' }
 const root = path.join(__dirname, '..') + '/'
 const out = process.stdout.write.bind(process.stdout)
+process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e })   // | head
 console.log = () => {}   // parsexml and loadmapping chat on stdout
 
 const args = process.argv.slice(2)
 const json = args.includes('--json')
 const ymlAt = args.indexOf('--yml')
 const yml = ymlAt >= 0 ? args[ymlAt + 1] : root + 'hamon.yml'
-const logs = args.filter((a, i) => !a.startsWith('--') && (ymlAt < 0 || i !== ymlAt + 1))
-if (logs.length === 0) logs.push(root + 'src/combined.log')
+const daysAt = args.indexOf('--days')
+const days = daysAt >= 0 ? Number(args[daysAt + 1]) : null
+if (days !== null && !(days > 0)) {
+    process.stderr.write('--days needs a number of days\n')
+    process.exit(2)
+}
+const logs = args.filter((a, i) => !a.startsWith('--') && (ymlAt < 0 || i !== ymlAt + 1) && (daysAt < 0 || i !== daysAt + 1))
+
+// local time as the log lines write it: "YYYY-MM-DD HH:MM:SS"
+const stamp = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().replace('T', ' ').slice(0, 19)
+const since = days !== null ? stamp(new Date(Date.now() - days * 24 * 60 * 60 * 1000)) : null
+if (logs.length === 0) {
+    // a file rotated on day D holds the lines up to D, so one dated before the
+    // window's first day holds nothing in it
+    const first = since !== null ? since.slice(0, 10).replace(/-/g, '') : null
+    const dir = root + 'src/'
+    const rotated = fs.readdirSync(dir).filter((f) => /^combined\.log-\d{8}(\.gz)?$/.test(f)).sort()
+    if (first !== null) {
+        for (const f of rotated) if (f.slice(13, 21) >= first) logs.push(dir + f)
+    }
+    logs.push(dir + 'combined.log')
+}
 
 // why KNXUltimate or hamon can't store a DPT, or undefined if it can
 const hamonGapCache = new Map()
@@ -98,21 +125,32 @@ function grade(pct, dev) {
     return g1 > g2 ? g1 : g2
 }
 
+// the span of time the logs cover inside the window, from the event lines
+const span = { first: null, last: null }
+
 async function readLogs(sites) {
     const strip = /\x1b\[[0-9;]*m/g
-    const event = /^info: >> \S+ \S+ Event (GroupValue_\w+) "[^"]*" -> "([^"]+)".*"site":"([^"]+)"/
+    const event = /^info: >> (\S+ \S+) Event (GroupValue_\w+) "[^"]*" -> "([^"]+)".*"site":"([^"]+)"/
     const unmapped = /^warn: UNMAPPED (\S+) (\S+) from /
     const device = /^warn: DEVICE (\S+) (\S+) \(.*\) from [^:]+: (.*), payload \S+(?: \((\d+) so far\))?/
     for (const file of logs) {
+        let now = null   // the time of the last event line, for lines without one
         let input = fs.createReadStream(file)
         if (file.endsWith('.gz')) input = input.pipe(zlib.createGunzip())
         for await (const raw of readline.createInterface({ input, crlfDelay: Infinity })) {
             const c = raw.charCodeAt(5) === 0x1b || raw.charCodeAt(0) === 0x1b ? raw.replace(strip, '') : raw
             let m
             if ((m = event.exec(c)) !== null) {
-                const s = sites.get(m[3])
-                if (s !== undefined && m[1] !== 'GroupValue_Read') s.live.add(m[2])
-            } else if ((m = unmapped.exec(c)) !== null) {
+                now = m[1]
+                if (since !== null && now < since) continue
+                if (span.first === null || now < span.first) span.first = now
+                if (span.last === null || now > span.last) span.last = now
+                const s = sites.get(m[4])
+                if (s !== undefined && m[2] !== 'GroupValue_Read') s.live.add(m[3])
+                continue
+            }
+            if (since !== null && (now === null || now < since)) continue
+            if ((m = unmapped.exec(c)) !== null) {
                 const s = sites.get(m[1])
                 if (s === undefined) continue
                 s.live.add(m[2]); s.unmappedSeen.add(m[2])
@@ -170,6 +208,9 @@ async function readLogs(sites) {
     if (json) return out(JSON.stringify(rows, null, 1) + '\n')
 
     const pad = (v, n) => String(v).padStart(n)
+    const hours = span.first && span.last ? Math.round((Date.parse(span.last.replace(' ', 'T')) - Date.parse(span.first.replace(' ', 'T'))) / 3600000) : 0
+    out((days !== null ? `last ${days} day${days === 1 ? '' : 's'} (since ${since.slice(0, 16)}); ` : '') +
+        (span.first ? `site events ${span.first.slice(0, 16)} to ${span.last.slice(0, 16)} (~${hours} h)\n\n` : 'no site events\n\n'))
     const quiet = rows.filter((r) => r.live === 0).map((r) => r.site)
     out(`${'site'.padEnd(14)} ${pad('export', 6)} ${pad('w/DPT', 5)}  ${'rules +/~/='.padEnd(11)} ${pad('live', 5)} ${pad('stored', 6)} ${pad('unmap', 6)} ${pad('device', 7)} ${pad('hamon', 9)}  grade\n`)
     for (const r of rows.filter((r) => r.live > 0)) {
