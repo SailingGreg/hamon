@@ -312,6 +312,9 @@ class UltimateConnection extends EventEmitter {
         const src = cemi.srcAddress.toString()
         const dest = cemi.dstAddress.toString()
         const data = evt === 'GroupValue_Read' ? undefined : npdu.dataValue
+        // a value in the APCI's low 6 bits (DPT 1-3, 23 ...) and a 1-byte value
+        // both arrive as a 1-byte Buffer: mark which, for the UNMAPPED log line
+        if (data) data.sixBit = npdu.dataBuffer == null
 
         // same targets and order as knx FSM.emitEvent
         this.emit(`event_${dest}`, evt, src, data)

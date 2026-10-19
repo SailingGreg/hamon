@@ -207,12 +207,16 @@ function createSite(location, opts, hooks) {
     }
 
     // a telegram hamon can't store because its GA isn't mapped: not in the
-    // export (nor added by a dptmappings rule), or without a DPT. Logged once
-    // per GA per start, so a GA added to the project after the export was
-    // taken shows up without a capture. GAs a site sharing this gateway
-    // stores are left out, and so are reads (no value)
+    // export (nor added by a dptmappings rule), or without a DPT. Logged the
+    // first time per GA per start, so a GA added to the project after the
+    // export was taken shows up without a capture, then once more for each new
+    // value up to UNMAPPED_VALUES, to help work out its DPT. Each line says
+    // whether the value came in the APCI's 6 bits (1-bit to 6-bit DPTs) or as
+    // bytes, which the hex alone can't. GAs a site sharing this gateway stores
+    // are left out, and so are reads (no value)
     const UNMAPPED_MAX = 100
-    const unmappedSeen = new Set()
+    const UNMAPPED_VALUES = 4
+    const unmappedSeen = new Map()   // GA -> the payloads logged, or null if not logged
     let unmappedLogged = 0
     let siblingGas = null
     function loadSiblingGas() {
@@ -223,13 +227,27 @@ function createSite(location, opts, hooks) {
         }
         return gas
     }
+    function unmappedPayload(value) {
+        if (!Buffer.isBuffer(value)) return JSON.stringify(value)
+        const kind = value.sixBit ? '6-bit' : value.sixBit === false ? `${value.length} byte${value.length === 1 ? '' : 's'}` : ''
+        return value.toString('hex') + (kind ? ` (${kind})` : '')
+    }
     function logUnmapped(evt, dest, src, value, why) {
-        if (evt === 'GroupValue_Read' || unmappedSeen.has(dest)) return
-        unmappedSeen.add(dest)
+        if (evt === 'GroupValue_Read') return
+        const payload = unmappedPayload(value)
+        if (unmappedSeen.has(dest)) {
+            const seen = unmappedSeen.get(dest)
+            if (seen === null || seen.has(payload) || seen.size >= UNMAPPED_VALUES) return
+            seen.add(payload)
+            log.warn('UNMAPPED %s %s from %s: value %d of up to %d, payload %s', name, dest, src,
+                seen.size, UNMAPPED_VALUES, payload)
+            return
+        }
+        unmappedSeen.set(dest, null)
         if (siblingGas === null) siblingGas = loadSiblingGas()
         if (siblingGas.has(dest) || unmappedLogged >= UNMAPPED_MAX) return
+        unmappedSeen.set(dest, new Set([payload]))
         unmappedLogged++
-        const payload = Buffer.isBuffer(value) ? value.toString('hex') : JSON.stringify(value)
         log.warn('UNMAPPED %s %s from %s: %s, payload %s%s', name, dest, src, why, payload,
             unmappedLogged === UNMAPPED_MAX ? ` (${UNMAPPED_MAX} GAs - no more logged until restart)` : '')
     }
