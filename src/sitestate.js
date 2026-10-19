@@ -10,6 +10,9 @@
  *              resolve, or its gateway doesn't answer); no timed retry -
  *              only a change to the site's own hamon.yml entry or kpipe
  *              re-checks it
+ *   misconfigured  its config is incomplete or wrong (KNX Secure values
+ *              missing, GA file missing or empty), so it can't work; not
+ *              started again until its config changes (or kpipe)
  *   disabled   enabled: false in hamon.yml
  *
  * The file is written on every change (tmp + rename, so a reader never sees a
@@ -45,6 +48,9 @@ function needsPrecheck(site, now = new Date(), days = PRECHECK_DAYS) {
     const last = site != null ? Date.parse(site.lastConnected) : NaN
     return isNaN(last) || now.getTime() - last > days * 24 * 60 * 60 * 1000
 }
+
+// states a site is held in, with no timed retry, until its config changes
+const HELD = ['blocked', 'misconfigured']
 
 class SiteState {
     constructor(file, { now = () => new Date(), pid = process.pid } = {}) {
@@ -89,7 +95,7 @@ class SiteState {
             s.lastConnected = now
         }
         // these only mean something in the state that set them
-        if (state !== 'blocked') { delete s.reason; delete s.detail; delete s.fingerprint }
+        if (!HELD.includes(state)) { delete s.reason; delete s.detail; delete s.fingerprint }
         if (state !== 'down') delete s.nextRetry
         this.sites[name] = s
         return s
@@ -102,11 +108,11 @@ class SiteState {
         }
     }
 
-    // a blocked site whose config hasn't changed since it was blocked stays
-    // blocked across a restart
+    // a blocked or misconfigured site whose config hasn't changed since stays
+    // that way across a restart
     stillBlocked(name, fp) {
         const s = this.sites[name]
-        return s != null && s.state === 'blocked' && s.fingerprint === fp
+        return s != null && HELD.includes(s.state) && s.fingerprint === fp
     }
 
     save(running = true) {
@@ -122,4 +128,4 @@ class SiteState {
     }
 }
 
-module.exports = { SiteState, fingerprint, needsPrecheck, PRECHECK_DAYS, CHANGE_FIELDS }
+module.exports = { SiteState, fingerprint, needsPrecheck, PRECHECK_DAYS, CHANGE_FIELDS, HELD }

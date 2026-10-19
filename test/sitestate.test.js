@@ -101,5 +101,22 @@ ok(!needsPrecheck({ state: 'down', lastConnected: '2026-10-09T12:00:01Z' }, at),
 ok(needsPrecheck({ state: 'down', lastConnected: '2026-10-09T11:59:59Z' }, at), 'over 7 days: checked')
 ok(needsPrecheck({ state: 'down', lastConnected: 'garbage' }, at), 'unreadable time: checked')
 
+// misconfigured is held like blocked: tied to the config, kept across a
+// restart, and its reason dropped when it leaves the state
+const st5 = new SiteState(path.join(dir, 'm.json'), { now: clock })
+const mloc = { ...loc, name: 'm', secure: true }
+const mfp = fingerprint(mloc, 'knxultimate', 1700000000000)
+st5.set('m', 'misconfigured', { reason: 'config', detail: 'no device authentication code', fingerprint: mfp })
+eq(st5.get('m').detail, 'no device authentication code', 'misconfigured keeps its detail')
+ok(st5.stillBlocked('m', mfp), 'misconfigured with the same config is held')
+ok(!st5.stillBlocked('m', fingerprint(mloc, 'knxultimate', 1700000000001)), 'a new GA file releases it')
+ok(!st5.stillBlocked('m', fingerprint({ ...mloc, tunnelIA: '1.1.9' }, 'knxultimate', 1700000000000)), 'a hamon.yml change releases it')
+ok(!st5.stillBlocked('m', fingerprint(mloc, 'knxultimate', null)), 'a GA file that has gone (no mtime) releases it')
+st5.save()
+const st6 = new SiteState(path.join(dir, 'm.json'))
+ok(st6.load() && st6.stillBlocked('m', mfp), 'misconfigured survives a save and reload')
+st5.set('m', 'starting')
+ok(!('reason' in st5.get('m')) && !('detail' in st5.get('m')), 'restarted: reason and detail gone')
+
 fs.rmSync(dir, { recursive: true, force: true })
 console.log(`sitestate: ${checks} checks passed`)

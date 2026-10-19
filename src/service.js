@@ -11,7 +11,7 @@ const { Worker } = require('worker_threads')
 const yaml = require('js-yaml')
 const logger = require('./logger')
 const effectiveStack = require('./knxstack').effective
-const { SiteState, fingerprint, needsPrecheck, CHANGE_FIELDS } = require('./sitestate')
+const { SiteState, fingerprint, needsPrecheck, CHANGE_FIELDS, HELD } = require('./sitestate')
 const effectiveDedupe = require('./dedupe').effective
 const { mappingSignature } = require('./strtodpt')
 
@@ -242,7 +242,7 @@ function start_worker(path, influxver, loc, survey, stack, dedupe) {
       const st = siteState != null ? siteState.get(loc.name) : null
       const why = pending[loc.name] ? ` (back-off, restart ${failures[loc.name]}`
             + ` in ${backoffDelay(failures[loc.name]) / 60000}min)`
-            : (st != null && st.state === 'blocked') ? ` (blocked, ${st.reason})` : ''
+            : (st != null && HELD.includes(st.state)) ? ` (${st.state}, ${st.reason})` : ''
       // 'Thread' for a worker, 'Site' for one in the main thread (threads: false)
       console.log(`${worker instanceof InlineWorker ? 'Site' : 'Thread'} exiting: ${loc.name}${why}, ${threads.size} running...`)
       if (shuttingDown && threads.size === 0) {
@@ -308,13 +308,16 @@ function scheduleRestart(name, delay) {
     }, delay);
 }
 
-// a worker stopped and said why. Its DNS name doesn't resolve, or its gateway
-// doesn't answer: blocked - no timed retry; a change to the site's own
-// hamon.yml entry (or its GA file) or kpipe re-checks it
-const BLOCK_REASONS = ['dns', 'unreachable']
+// a worker stopped and said why, and it's one a retry won't fix - so no timed
+// retry; a change to the site's own hamon.yml entry (or its GA file) or kpipe
+// re-checks it:
+//   blocked        its DNS name doesn't resolve, or its gateway doesn't answer
+//   misconfigured  its config is incomplete or wrong (Secure values, GA file)
+const HOLD_REASONS = { dns: 'blocked', unreachable: 'blocked', config: 'misconfigured' }
 function stopped(data) {
     const name = data.stopped;
-    if (!BLOCK_REASONS.includes(data.reason)) { // not one we block on: as a timeout
+    const state = HOLD_REASONS[data.reason];
+    if (state == null) { // not one we hold a site for: as a timeout
         logger.info(`${name}: stopped (${data.reason}) - ${data.detail}`)
         requestRestart(name);
         return;
@@ -324,13 +327,13 @@ function stopped(data) {
     const fp = loc != null ? fingerprint(loc, effectiveStack(loc.stack, originalDoc.stack), loc.mtime) : null;
     // a kpipe re-check that fails the same way stays out of error.log
     if (lastBlocked[name] === data.reason) {
-        logger.info(`${name}: still blocked (${data.reason}) - ${data.detail}`)
+        logger.info(`${name}: still ${state} (${data.reason}) - ${data.detail}`)
     } else {
-        logger.error(`${name}: BLOCKED (${data.reason}) - ${data.detail}; `
+        logger.error(`${name}: ${state.toUpperCase()} (${data.reason}) - ${data.detail}; `
                      + `re-checked when its hamon.yml entry changes or on kpipe`)
     }
     lastBlocked[name] = data.reason;
-    setState(name, 'blocked', { reason: data.reason, detail: data.detail, fingerprint: fp });
+    setState(name, state, { reason: data.reason, detail: data.detail, fingerprint: fp });
 }
 
 // start/restart the location
@@ -385,8 +388,10 @@ async function ConnectionService(firstrun, path, doc) {
     let loc = doc.locations[location]
     logger.info(`Checking: ${loc.name} ${loc.dns} ${loc.port} ${loc.device}`)
 
-    // added config to suport move of config files
-    let stats = fs.statSync(path + 'config/' + loc.config);
+    // added config to suport move of config files. A missing GA file has no
+    // mtime; the site's worker reports it (misconfigured)
+    let stats = { mtimeMs: null };
+    try { stats = fs.statSync(path + 'config/' + loc.config); } catch (e) { }
     //let stats = fs.statSync(path + loc.config);
     if (firstrun != true) { // check if there is a change
         // config change?
@@ -473,7 +478,7 @@ async function ConnectionService(firstrun, path, doc) {
             }
             if (siteState != null && siteState.stillBlocked(loc.name, fp)) {
                 lastBlocked[loc.name] = last.reason;
-                logger.info(`${loc.name}: still blocked (${last.reason}) since ${last.since} - not started; `
+                logger.info(`${loc.name}: still ${last.state} (${last.reason}) since ${last.since} - not started; `
                             + `change its hamon.yml entry or kpipe it to re-check`)
             } else if (last != null && last.state === 'down' && last.nextRetry != null
                        && Date.parse(last.nextRetry) > Date.now() && !needsPrecheck(last)) {

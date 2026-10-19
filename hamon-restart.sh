@@ -17,7 +17,7 @@
 #    hamon.log, their gateways have already dropped the tunnel and a short
 #    wait does. Any that didn't: the full wait, as before.
 #  - after the start: done as soon as the new hamon has no site still
-#    starting (connected, blocked, down or disabled), at most CHECK_WAIT.
+#    starting (connected, blocked, misconfigured, down or disabled), at most CHECK_WAIT.
 #
 # Usage:
 #   ./hamon-restart.sh            # asks for confirmation
@@ -142,7 +142,8 @@ for site in $enabled; do
 done
 
 log "$SERVICE up: $ok/$total enabled sites connected"
-# what hamon says about the rest: blocked (why), down (next retry), starting
+# what hamon says about the rest: misconfigured and blocked (why), down (next
+# retry), starting
 if [ -n "$settled" ] || [ -f "$STATE" ]; then
   python3 - "$STATE" "$pid" <<'PY' 2>/dev/null && missing=()
 import json, sys
@@ -152,7 +153,7 @@ local = lambda t: datetime.fromisoformat(t.replace("Z", "+00:00")).astimezone().
 if d.get("pid") != int(sys.argv[2]):
     sys.exit(1)  # not the new hamon's file: use the log-based list below
 rest = {k: v for k, v in d.get("sites", {}).items() if v.get("state") not in ("connected", "disabled")}
-for state in ("blocked", "down", "starting"):
+for state in ("misconfigured", "blocked", "down", "starting"):
     names = sorted(k for k, v in rest.items() if v["state"] == state)
     if names:
         print(f"{state.capitalize()}:")
@@ -160,7 +161,10 @@ for state in ("blocked", "down", "starting"):
         v = rest[k]
         why = v.get("detail") or v.get("reason") or (f"retry at {local(v['nextRetry'])}" if v.get("nextRetry") else "")
         print(f"  - {k}" + (f"  ({why})" if why else ""))
-if rest:
+states = {v["state"] for v in rest.values()}
+if "misconfigured" in states:
+    print("Misconfigured sites: fix the config (hamon-upload, or the site's hamon.yml entry) - saving restarts them")
+if "blocked" in states:
     print("Blocked sites: Re-check in hamon-upload, or echo <site> > kpipe")
 PY
 fi

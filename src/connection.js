@@ -7,7 +7,8 @@
  *
  * The site's hooks become messages to service.js, as before:
  *   { connected: name }                     the tunnel is up
- *   { stopped: name, reason, detail }       blocked ('dns', 'unreachable')
+ *   { stopped: name, reason, detail }       blocked ('dns', 'unreachable') or
+ *                                           misconfigured ('config')
  *   name                                    timed out: restart with back-off
  *   an uncaught error                       worker 'error': restart
  */

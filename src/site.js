@@ -9,7 +9,8 @@
  *
  *   connected()               the tunnel is up (resets the restart back-off)
  *   stopped(reason, detail)   it stopped for a reason a retry won't fix
- *                             ('dns', 'unreachable'): service.js blocks it
+ *                             ('dns', 'unreachable'): service.js blocks it;
+                             ('config'): service.js marks it misconfigured
  *   timeout()                 it gave up (no connection in time, or still
  *                             failing 15 min after an error): restart with back-off
  *   error(err)                anything unexpected; treated as a crash
@@ -334,6 +335,33 @@ function createSite(location, opts, hooks) {
         }
         quietDptlib(logging)
 
+        // the site's own config first: KNX Secure values (from
+        // .hamon-secrets.json, see secrets.js - anything missing or not
+        // matching the site throws), the GA file and the dpt mappings. A
+        // problem here won't go away on a retry, so stop and say why;
+        // service.js marks the site misconfigured until its config changes
+        let secureTunnel
+        try {
+            if (secure === true) {
+                secureTunnel = secureOptions(path, { ...location, stack: siteStack })
+                log.info('%s: KNX Secure tunnel %s (user %d) on gateway %s, %d Data Secure GA(s)', name,
+                    secureTunnel.tunnelIA, secureTunnel.userId, secureTunnel.gateway,
+                    Object.keys(secureTunnel.groupKeys).length)
+            }
+            if (!config) throw new Error('no config: (GA file) in hamon.yml')
+            // a .knxproj site reads its .json, which throws if it's missing
+            if (!config.endsWith('.knxproj') && !fs.existsSync(path + 'config/' + config)) {
+                throw new Error(`GA file config/${config} not found`)
+            }
+            groupAddresses = loadGroupAddresses()
+            // parsexml returns an empty map for a file it can't read: the site
+            // would connect and store nothing
+            if (Object.keys(groupAddresses).length === 0) throw new Error(`no group addresses in config/${config}`)
+            loadmapping(path, name) // initialise the str to dtp mappings
+        } catch (err) {
+            return finish(hooks.stopped, 'config', err.message)
+        }
+
         let knxAddr = null
         try {
             knxAddr = (await dnsp.lookup(String(dns), { family: 4 })).address
@@ -349,22 +377,6 @@ function createSite(location, opts, hooks) {
         // say why; service.js blocks the site (no timed retry) until its
         // hamon.yml entry changes or it is kpiped
         if (knxAddr == null) return finish(hooks.stopped, 'dns', `DNS lookup failed for ${dns}`)
-
-        // KNX Secure tunnelling: the values come from .hamon-secrets.json (see
-        // secrets.js); anything missing or not matching the site throws
-        let secureTunnel
-        try {
-            if (secure === true) {
-                secureTunnel = secureOptions(path, { ...location, stack: siteStack })
-                log.info('%s: KNX Secure tunnel %s (user %d) on gateway %s, %d Data Secure GA(s)', name,
-                    secureTunnel.tunnelIA, secureTunnel.userId, secureTunnel.gateway,
-                    Object.keys(secureTunnel.groupKeys).length)
-            }
-            groupAddresses = loadGroupAddresses()
-            loadmapping(path, name) // initialise the str to dtp mappings
-        } catch (err) {
-            return finish(hooks.error, err)
-        }
 
         // a site that hasn't connected recently (service.js decides: none in the
         // last 7 days, from tmp/site-state.json) first checks the gateway is

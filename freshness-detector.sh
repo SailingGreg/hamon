@@ -47,6 +47,8 @@
 #     hamon, and only a docker restart fixes it. A stale site hamon reports as
 #     connected is the "connected but silent" case only this detector can see;
 #     its STALE line says so (hamon: connected), so those cases can be counted.
+#     A misconfigured site is always left to hamon, container or not: its
+#     config is wrong, and no restart fixes that.
 #     No file, or ha-mon not running: act as before.
 #   * Cooldown: a site that stays stale is restarted at once, then after
 #     cooldown, 2x, 4x ... cooldown_max, instead of on every 5-minute run.  The
@@ -287,7 +289,7 @@ while IFS=, read -r loc ts; do
   # hamon already knows this site isn't connected and is handling it
   # (back-off, or blocked) - leave it, unless only a container restart can help
   hs="${HAMON_SITE[$loc]:-}"
-  if [ -n "$hs" ] && [ "$hs" != "connected" ] && [[ "$(yml_field "$loc" dns)" != 172.* ]]; then
+  if [ "$hs" = "misconfigured" ] || { [ -n "$hs" ] && [ "$hs" != "connected" ] && [[ "$(yml_field "$loc" dns)" != 172.* ]]; }; then
     known=$((known + 1))
     log "KNOWN $loc ${age}m (>=${thresh}m) hamon: $hs - left to hamon"
     continue
