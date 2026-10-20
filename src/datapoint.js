@@ -26,6 +26,8 @@ class Datapoint extends EventEmitter {
         super()
         this.options = options
         this.dptid = options.dpt || 'DPT1.001'   // as knx
+        // a GA without a DPT is the site's UNMAPPED line, not a device fault
+        this.typed = options.dpt != null
         this.dpt = null
         try {
             this.dpt = DPTLib.resolve(this.dptid)
@@ -42,7 +44,7 @@ class Datapoint extends EventEmitter {
             if ((evt === 'GroupValue_Write' || evt === 'GroupValue_Response') && buf) {
                 const value = this.decode(buf)
                 // a telegram that can't be stored: tell the site (it logs it)
-                if (value == null && this.dpt !== null) this.emit('invalid', src, buf, this.invalidReason(buf))
+                if (value == null && this.dpt !== null && this.typed) this.emit('invalid', src, buf, this.invalidReason(buf))
                 this.update(value)
             }
         })

@@ -118,6 +118,7 @@ console.log(`write: ${writes} cases (valid encode as knx, invalid refused)`)
         ['DPT6.010', '0000', /doesn't fit DPT6\.010/],
         ['DPT9.001', '0c1a', null],
         ['DPT1.001', '01', null],
+        [undefined, '0000', null],   // no DPT: decoded as 1.001, but not a device fault
     ]
     for (const [dpt, hex, want] of cases) {
         const c = new FakeConn()
