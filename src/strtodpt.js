@@ -96,8 +96,14 @@ function loadmapping(loc, site) {
 
     // mapstr str - use if undefined dpt = strtodpt.mapstr();
 function mapstring (loc, str) {
+        const rule = maprule(loc, str);
+        return rule === undefined ? undefined : rule.dpt;
+}
 
-        //console.log(lines);
+// the first name rule that matches a GA name at this location, as
+// { loc, pattern, dpt } (pattern with its "^" for starts-with), or undefined
+function maprule (loc, str) {
+
         // iterate over the lines
         for (let line of lines) {
 
@@ -105,21 +111,8 @@ function mapstring (loc, str) {
             if (line[0].length > 0 && loc.length > 0 && line[0] != loc)
                 continue;
 
-            //console.log(line, str);
-            if (line[3] == "1") {
-                //console.log("Starts with %s check", str);
-                if (str.startsWith(line[1])) {
-                    //console.log ("Match start: ", line[2]);
-                    return line[2];
-                }
-            //} else if (line[1].includes(str)) {
-            } else {
-                //console.log("Includes %s check", str);
-                if (str.includes(line[1])) {
-                    //console.log ("Match includes: ", line[2]);
-                    return line[2];
-                }
-            }
+            if (line[3] == "1" ? str.startsWith(line[1]) : str.includes(line[1]))
+                return { loc: line[0], pattern: (line[3] == "1" ? "^" : "") + line[1], dpt: line[2] };
         }
 
         return undefined;
@@ -164,6 +157,7 @@ function addressRules (loc) {
 }
 
 module.exports.mapstring = mapstring;
+module.exports.maprule = maprule;
 module.exports.mapaddress = mapaddress;
 module.exports.addressRules = addressRules;
 module.exports.mappingSignature = mappingSignature;
