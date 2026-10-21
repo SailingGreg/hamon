@@ -4,7 +4,7 @@
  * dptmappings rules it needed, the live GAs it stores, and the problems the
  * logs report. Run from the hamon directory on the server.
  *
- *   node utils/sitescore.js [--json] [--yml hamon.yml] [--days N] [combined.log ...]
+ *   node utils/sitescore.js [--json] [--untyped] [--yml hamon.yml] [--days N] [combined.log ...]
  *
  * Logs default to src/combined.log (rotated .gz files are fine). Only event
  * lines labelled with a site ("site":"...") count towards the live GAs.
@@ -14,6 +14,12 @@
  * src/combined.log-YYYYMMDD.gz files that can hold that window. Event lines
  * carry a time; UNMAPPED and DEVICE lines don't, and take the time of the last
  * event line before them. The header says which span the logs actually cover.
+ *
+ * --untyped also lists, per site, the GAs the export has but hamon still has no
+ * DPT for: the gaps that turn into UNMAPPED lines once the GA is used. They are
+ * grouped by the kind of GA their ETS name says (see family()), so a kind can
+ * become one dptmappings name rule; "*" marks the ones seen live. Sites with no
+ * live traffic are only counted.
  *
  * Columns, one row per site:
  *   export   GAs in the ETS export, and the share that have a DPT there
@@ -50,6 +56,7 @@ console.log = () => {}   // parsexml and loadmapping chat on stdout
 
 const args = process.argv.slice(2)
 const json = args.includes('--json')
+const untyped = args.includes('--untyped')
 const ymlAt = args.indexOf('--yml')
 const yml = ymlAt >= 0 ? args[ymlAt + 1] : root + 'hamon.yml'
 const daysAt = args.indexOf('--days')
@@ -93,7 +100,7 @@ function hamonGap(dpt) {
 // a site's GAs as hamon resolves them (see utils/gadpts.js)
 function siteTable(loc) {
     const gas = ets.parsexml(root + 'config/' + loc.config) || {}
-    const s = { exported: 0, withDpt: 0, added: 0, overridden: 0, named: 0, dpt: new Map(), gaps: new Map() }
+    const s = { exported: 0, withDpt: 0, added: 0, overridden: 0, named: 0, dpt: new Map(), gaps: new Map(), untyped: new Map(), typed: [] }
     for (const ga of Object.values(gas)) { s.exported++; if (ga.dpt != undefined) s.withDpt++ }
     loadmapping(root, loc.name)
     for (const rule of addressRules(loc.name)) {
@@ -110,8 +117,9 @@ function siteTable(loc) {
         const name = arule !== undefined && arule.name !== undefined ? arule.name : ga.name
         if (dpt == undefined) { dpt = mapstring(loc.name, name); if (dpt != undefined) s.named++ }
         if (DEFAULT_SUBTYPE[dpt] !== undefined) dpt += DEFAULT_SUBTYPE[dpt]
-        if (dpt == undefined) continue
+        if (dpt == undefined) { s.untyped.set(key, name); continue }
         s.dpt.set(key, dpt)
+        s.typed.push([name, dpt])
         const why = hamonGap(dpt)
         if (why !== undefined) s.gaps.set(key, `${dpt} ${why}`)
     }
@@ -166,6 +174,63 @@ async function readLogs(sites) {
     }
 }
 
+// the kind of GA an ETS name is, with numbers as "#": names like "Function -
+// Room - Item" keep the part before the room and item; for "A - B" the side
+// more names share; otherwise the last two words
+const norm = (t) => t.trim().replace(/\d+/g, '#')
+function family(name, common) {
+    const parts = String(name || '').split(' - ').map(norm).filter((p) => p)
+    if (parts.length >= 3) return parts.slice(0, -2).join(' - ')
+    if (parts.length === 2) return (common.get(parts[1]) || 0) > (common.get(parts[0]) || 0) ? '... - ' + parts[1] : parts[0] + ' - ...'
+    const words = (parts[0] || '').split(/\s+/)
+    return words.slice(-2).join(' ') || '(no name)'
+}
+
+function listUntyped(rows) {
+    const gaKey = (g) => g.split('/').map((p) => p.padStart(5, '0')).join('/')
+    const withGaps = rows.filter((r) => Object.keys(r.untyped).length).sort((a, b) => a.site.localeCompare(b.site))
+    const count = (rs) => rs.reduce((t, r) => t + Object.keys(r.untyped).length, 0)
+    const quiet = withGaps.filter((r) => r.live === 0)
+    out(`\nuntyped GAs in the exports (no DPT after dptmappings; * = seen live): ${count(withGaps) - count(quiet)} on ` +
+        `${withGaps.length - quiet.length} live sites, ${Object.values(withGaps).reduce((t, r) => t + Object.values(r.untyped).filter((u) => u.live).length, 0)} seen live\n`)
+    if (quiet.length) out(`(and ${count(quiet)} on sites with no live traffic, not listed: ${quiet.map((r) => r.site).join(' ')})\n`)
+    // the DPTs typed GAs of each kind have, on each site and on all of them
+    const evidence = new Map(), everywhere = new Map()
+    const tally = (m, f, dpt) => { const t = m.get(f) || new Map(); t.set(dpt, (t.get(dpt) || 0) + 1); m.set(f, t) }
+    const commons = new Map()
+    for (const r of rows) {
+        const common = new Map()
+        for (const n of Object.values(r.untyped).map((u) => u.name).concat(r.typed.map(([n]) => n))) {
+            const parts = String(n || '').split(' - ').map(norm)
+            if (parts.length === 2) for (const p of parts) common.set(p, (common.get(p) || 0) + 1)
+        }
+        commons.set(r.site, common)
+        const here = new Map()
+        for (const [n, dpt] of r.typed) { const f = family(n, common); tally(here, f, dpt); tally(everywhere, f, dpt) }
+        evidence.set(r.site, here)
+    }
+    const show = (t) => t ? [...t].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([d, n]) => `${d.replace('DPT', '')} x${n}`).join(', ') : ''
+    for (const r of withGaps.filter((r) => r.live > 0)) {
+        const common = commons.get(r.site)
+        const fams = new Map()
+        for (const [ga, u] of Object.entries(r.untyped)) {
+            const f = family(u.name, common)
+            const e = fams.get(f) || { gas: [], example: u.name }
+            e.gas.push(ga + (u.live ? '*' : ''))
+            fams.set(f, e)
+        }
+        out(`\n${r.site}: ${Object.keys(r.untyped).length} untyped of ${r.exported} exported, ${fams.size} kinds\n`)
+        const sorted = [...fams].sort((a, b) => b[1].gas.length - a[1].gas.length || a[0].localeCompare(b[0]))
+        for (const [f, e] of sorted) {
+            const gas = e.gas.sort((a, b) => gaKey(a.replace('*', '')).localeCompare(gaKey(b.replace('*', ''))))
+            const site = show(evidence.get(r.site).get(f)), all = show(everywhere.get(f))
+            out(`  ${pad2(gas.length)}  ${f.padEnd(40)} e.g. ${JSON.stringify(e.example)}: ${gas.length > 6 ? gas.slice(0, 6).join(' ') + ` +${gas.length - 6}` : gas.join(' ')}\n`)
+            if (site || all) out(`       typed: ${site ? 'here ' + site : 'none here'}${all && all !== site ? '; all sites ' + all : ''}\n`)
+        }
+    }
+}
+const pad2 = (n) => String(n).padStart(3)
+
 ;(async () => {
     const conf = yaml.load(fs.readFileSync(yml, 'utf8'))
     const sites = new Map()
@@ -201,6 +266,8 @@ async function readLogs(sites) {
             deviceLength: s.device.size - invalid,
             hamonGaps: Object.fromEntries([...s.gaps].filter(([g]) => s.live.has(g)).sort()),
             hamonGapsExport: s.gaps.size,
+            typed: s.typed,
+            untyped: Object.fromEntries([...s.untyped].map(([g, n]) => [g, { name: n, live: s.live.has(g) }])),
             grade: s.live.size ? grade(pctSite, s.device.size) : '-'
         })
     }
@@ -231,4 +298,5 @@ async function readLogs(sites) {
         for (const [ga, why] of Object.entries(r.hamonGaps)) byDpt.set(why, (byDpt.get(why) || []).concat(ga))
         for (const [why, gas] of byDpt) out(`  hamon:    ${why}: ${gas.length > 6 ? gas.slice(0, 6).join(' ') + ` +${gas.length - 6}` : gas.join(' ')}\n`)
     }
+    if (untyped) listUntyped(rows)
 })()
