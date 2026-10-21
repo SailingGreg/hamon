@@ -4,7 +4,7 @@
  * dptmappings rules it needed, the live GAs it stores, and the problems the
  * logs report. Run from the hamon directory on the server.
  *
- *   node utils/sitescore.js [--json] [--untyped] [--yml hamon.yml] [--days N] [combined.log ...]
+ *   node utils/sitescore.js [--json] [--untyped] [--rules] [--yml hamon.yml] [--days N] [combined.log ...]
  *
  * Logs default to src/combined.log (rotated .gz files are fine). Only event
  * lines labelled with a site ("site":"...") count towards the live GAs.
@@ -20,6 +20,15 @@
  * grouped by the kind of GA their ETS name says (see family()), so a kind can
  * become one dptmappings name rule; "*" marks the ones seen live. Sites with no
  * live traffic are only counted.
+ *
+ * --rules instead checks the dptmappings rules against the bus: for each rule,
+ * the GAs it gives a DPT to, how many of them were seen live, and how many of
+ * those look wrong - a DEVICE line (the payload doesn't fit the DPT) or a value
+ * outside the DPT's usual range. Only telegrams decoded with the GA's DPT now
+ * count, not ones logged before a rule changed it. A rule is "confirmed" once
+ * its GAs have been seen with nothing wrong, "unseen" until then, and "check"
+ * when any look wrong.
+ * Address rules are counted per site as one line.
  *
  * Columns, one row per site:
  *   export   GAs in the ETS export, and the share that have a DPT there
@@ -43,7 +52,7 @@ const zlib = require('zlib')
 const readline = require('readline')
 const yaml = require('js-yaml')
 const ets = require('../parsexml')
-const { loadmapping, mapstring, mapaddress, addressRules } = require('../src/strtodpt')
+const { loadmapping, maprule, mapaddress, addressRules } = require('../src/strtodpt')
 const { dptInfo, dptMain, OBJECT_DPTS } = require('../src/dptnames')
 const kxu = require('knxultimate/build/dptlib')
 
@@ -57,6 +66,7 @@ console.log = () => {}   // parsexml and loadmapping chat on stdout
 const args = process.argv.slice(2)
 const json = args.includes('--json')
 const untyped = args.includes('--untyped')
+const rules = args.includes('--rules')
 const ymlAt = args.indexOf('--yml')
 const yml = ymlAt >= 0 ? args[ymlAt + 1] : root + 'hamon.yml'
 const daysAt = args.indexOf('--days')
@@ -100,7 +110,7 @@ function hamonGap(dpt) {
 // a site's GAs as hamon resolves them (see utils/gadpts.js)
 function siteTable(loc) {
     const gas = ets.parsexml(root + 'config/' + loc.config) || {}
-    const s = { exported: 0, withDpt: 0, added: 0, overridden: 0, named: 0, dpt: new Map(), gaps: new Map(), untyped: new Map(), typed: [] }
+    const s = { exported: 0, withDpt: 0, added: 0, overridden: 0, named: 0, dpt: new Map(), gaps: new Map(), untyped: new Map(), typed: [], rule: new Map() }
     for (const ga of Object.values(gas)) { s.exported++; if (ga.dpt != undefined) s.withDpt++ }
     loadmapping(root, loc.name)
     for (const rule of addressRules(loc.name)) {
@@ -113,9 +123,13 @@ function siteTable(loc) {
             if (dpt != undefined) s.overridden++
             else s.named++
             dpt = arule.dpt
+            s.rule.set(key, `"${loc.name}","@..." address rules`)
         }
         const name = arule !== undefined && arule.name !== undefined ? arule.name : ga.name
-        if (dpt == undefined) { dpt = mapstring(loc.name, name); if (dpt != undefined) s.named++ }
+        if (dpt == undefined) {
+            const nrule = maprule(loc.name, name)
+            if (nrule !== undefined) { dpt = nrule.dpt; s.named++; s.rule.set(key, `"${nrule.loc}","${nrule.pattern}",${nrule.dpt}`) }
+        }
         if (DEFAULT_SUBTYPE[dpt] !== undefined) dpt += DEFAULT_SUBTYPE[dpt]
         if (dpt == undefined) { s.untyped.set(key, name); continue }
         s.dpt.set(key, dpt)
@@ -138,7 +152,7 @@ const span = { first: null, last: null }
 
 async function readLogs(sites) {
     const strip = /\x1b\[[0-9;]*m/g
-    const event = /^info: >> (\S+ \S+) Event (GroupValue_\w+) "[^"]*" -> "([^"]+)".*"site":"([^"]+)"/
+    const event = /^info: >> (\S+ \S+) Event (GroupValue_\w+) "[^"]*" -> "([^"]+)"(?:.* - (DPT_\w+)\) - (\S*))?.*"site":"([^"]+)"/
     const unmapped = /^warn: UNMAPPED (\S+) (\S+) from /
     const device = /^warn: DEVICE (\S+) (\S+) \(.*\) from [^:]+: (.*), payload \S+(?: \((\d+) so far\))?/
     for (const file of logs) {
@@ -153,8 +167,19 @@ async function readLogs(sites) {
                 if (since !== null && now < since) continue
                 if (span.first === null || now < span.first) span.first = now
                 if (span.last === null || now > span.last) span.last = now
-                const s = sites.get(m[4])
-                if (s !== undefined && m[2] !== 'GroupValue_Read') s.live.add(m[3])
+                const s = sites.get(m[6])
+                if (s !== undefined && m[2] !== 'GroupValue_Read') {
+                    s.live.add(m[3])
+                    // values decoded with the GA's DPT now (not one a rule has since replaced)
+                    const info = rules && s.rule.has(m[3]) ? dptInfo(s.dpt.get(m[3])) : undefined
+                    if (info !== undefined && m[4] === info.name) {
+                        const v = s.values.get(m[3]) || { n: 0, min: Infinity, max: -Infinity }
+                        v.n++
+                        const x = Number(m[5])
+                        if (m[5] !== '' && !isNaN(x)) { v.min = Math.min(v.min, x); v.max = Math.max(v.max, x) }
+                        s.values.set(m[3], v)
+                    }
+                }
                 continue
             }
             if (since !== null && (now === null || now < since)) continue
@@ -166,8 +191,10 @@ async function readLogs(sites) {
             } else if ((m = device.exec(c)) !== null) {
                 const s = sites.get(m[1])
                 if (s === undefined) continue
-                const d = s.device.get(m[2]) || { n: 0, invalid: m[3].includes('7FFFh') }
+                const d = s.device.get(m[2]) || { n: 0, invalid: m[3].includes('7FFFh'), dpts: new Set() }
                 d.n = Math.max(d.n + 1, Number(m[4] || 0))
+                const dm = m[3].match(/DPT\d+\.\d+/)
+                d.dpts.add(dm ? dm[0] : '')
                 s.device.set(m[2], d)
             }
         }
@@ -231,6 +258,58 @@ function listUntyped(rows) {
 }
 const pad2 = (n) => String(n).padStart(3)
 
+// the usual range of a DPT's values, where a wrong DPT would show
+const RANGE = {
+    'DPT5.001': [0, 100], 'DPT5.003': [0, 360], 'DPT5.004': [0, 255], 'DPT5.010': [0, 255],
+    'DPT6.001': [-128, 127], 'DPT6.010': [-128, 127],
+    'DPT9.001': [-30, 90], 'DPT9.002': [-50, 50], 'DPT9.004': [0, 200000], 'DPT9.007': [0, 100],
+    'DPT17.001': [0, 63], 'DPT20.102': [0, 4], 'DPT20.105': [0, 20]
+}
+function outOfRange(dpt, v) {
+    const r = RANGE[dpt]
+    return r !== undefined && v.min !== Infinity && (v.min < r[0] || v.max > r[1])
+}
+
+function checkRules(sites) {
+    const byRule = new Map()
+    for (const [site, s] of sites) {
+        for (const [ga, rule] of s.rule) {
+            const r = byRule.get(rule) || { gas: 0, live: 0, events: 0, bad: [], sites: new Set(), min: Infinity, max: -Infinity }
+            r.gas++; r.sites.add(site)
+            if (s.live.has(ga)) {
+                r.live++
+                if (s.values.has(ga)) r.decoded = (r.decoded || 0) + 1
+                const v = s.values.get(ga)
+                const dpt = s.dpt.get(ga)
+                if (v) { r.events += v.n; r.min = Math.min(r.min, v.min); r.max = Math.max(r.max, v.max) }
+                // a DEVICE line counts only if it was logged with the GA's DPT now
+                const d = s.device.get(ga)
+                if (d && (d.dpts.has(dpt) || d.dpts.has(''))) r.bad.push(`${site} ${ga} DEVICE`)
+                else if (v && outOfRange(dpt, v)) r.bad.push(`${site} ${ga} ${v.min}..${v.max}`)
+            }
+            byRule.set(rule, r)
+        }
+    }
+    const rows = [...byRule].map(([rule, r]) => Object.assign(r, { rule, status: r.bad.length ? 'check' : r.decoded ? 'confirmed' : 'unseen' }))
+    if (json) return out(JSON.stringify(rows.map((r) => Object.assign({}, r, { sites: [...r.sites] })), null, 1) + '\n')
+    const hours = span.first && span.last ? Math.round((Date.parse(span.last.replace(' ', 'T')) - Date.parse(span.first.replace(' ', 'T'))) / 3600000) : 0
+    out((days !== null ? `last ${days} day${days === 1 ? '' : 's'}; ` : '') + (span.first ? `site events ${span.first.slice(0, 16)} to ${span.last.slice(0, 16)} (~${hours} h)\n` : 'no site events\n'))
+    const count = (st) => rows.filter((r) => r.status === st)
+    const gas = (rs) => rs.reduce((t, r) => t + r.gas, 0)
+    const live = (rs) => rs.reduce((t, r) => t + r.live, 0)
+    out(`${rows.length} rules giving ${gas(rows)} GAs a DPT; ${live(rows)} of those GAs seen live\n`)
+    for (const st of ['check', 'confirmed', 'unseen']) out(`  ${st.padEnd(9)} ${String(count(st).length).padStart(4)} rules  ${String(gas(count(st))).padStart(6)} GAs\n`)
+    const order = { check: 0, confirmed: 1, unseen: 2 }
+    rows.sort((a, b) => order[a.status] - order[b.status] || b.gas - a.gas || a.rule.localeCompare(b.rule))
+    out(`\n${'status'.padEnd(9)} ${'GAs'.padStart(5)} ${'live'.padStart(5)} ${'events'.padStart(7)} ${'values'.padEnd(16)} rule\n`)
+    for (const r of rows) {
+        const vals = r.min === Infinity ? '' : r.min === r.max ? `${r.min}` : `${r.min}..${r.max}`
+        out(`${r.status.padEnd(9)} ${String(r.gas).padStart(5)} ${String(r.live).padStart(5)} ${String(r.events).padStart(7)} ${vals.slice(0, 16).padEnd(16)} ${r.rule}` +
+            `${r.rule.startsWith('"",') ? ` (${r.sites.size} sites)` : ''}\n`)
+        if (r.bad.length) out(`          ${r.bad.slice(0, 5).join(' | ')}${r.bad.length > 5 ? ` +${r.bad.length - 5}` : ''}\n`)
+    }
+}
+
 ;(async () => {
     const conf = yaml.load(fs.readFileSync(yml, 'utf8'))
     const sites = new Map()
@@ -238,9 +317,10 @@ const pad2 = (n) => String(n).padStart(3)
         if (!loc || loc.enabled === false || !loc.config || !loc.config.endsWith('.xml')) continue
         let s
         try { s = siteTable(loc) } catch (e) { continue }
-        sites.set(loc.name, Object.assign(s, { live: new Set(), unmappedSeen: new Set(), capped: false, device: new Map() }))
+        sites.set(loc.name, Object.assign(s, { live: new Set(), unmappedSeen: new Set(), capped: false, device: new Map(), values: new Map() }))
     }
     await readLogs(sites)
+    if (rules) return checkRules(sites)
 
     const rows = []
     for (const [name, s] of sites) {
@@ -261,7 +341,7 @@ const pad2 = (n) => String(n).padStart(3)
             storedPct: pct === null ? null : Math.round(pct * 10) / 10,
             unmapped: unmapped.sort(),
             unmappedCapped: s.capped,
-            device: Object.fromEntries([...s.device].sort()),
+            device: Object.fromEntries([...s.device].sort().map(([g, d]) => [g, { n: d.n, invalid: d.invalid }])),
             deviceInvalid: invalid,
             deviceLength: s.device.size - invalid,
             hamonGaps: Object.fromEntries([...s.gaps].filter(([g]) => s.live.has(g)).sort()),
