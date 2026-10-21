@@ -5,7 +5,7 @@
  * Connection, so that is all this provides:
  *
  *   Connection({ ipAddr, ipPort, physAddr, suppress_ack_ldatareq, loglevel, site, log,
- *                secure, handlers: { connected, event, error } })
+ *                secure, dataSecure, handlers: { connected, event, error } })
  *   .state            'idle' while connected (what connection.js tests for)
  *   .conntime         set while connected (knx.Datapoint autoread checks it)
  *   .write(ga, value, dptid, cb) / .writeRaw(ga, buf, bitlength, cb) / .read(ga, cb) / .Disconnect()
@@ -26,6 +26,10 @@
  * Secure GAs decoding without a word. A failed secure
  * authentication won't be fixed by retrying every 15 s, so it stops the
  * library's auto-reconnect and leaves the retry to hamon's restart back-off.
+ *
+ * On a plain tunnel, `dataSecure` (a site's Data Secure group keys) has the
+ * shim decrypt S-A_Data telegrams itself (datasecure.js); a secured telegram it
+ * can't open is logged (DATASECURE) rather than silently dropped.
  *
  * Unlike knx, KNXUltimate throws where knx coped quietly, and those throws
  * would kill the worker, so the shim catches them:
@@ -49,6 +53,7 @@ const { AsyncLocalStorage } = require('async_hooks')
 const { isMainThread } = require('worker_threads')
 const DPTLib = require('knx/src/dptlib')
 const logger = require('./logger')
+const { DataSecure, isSecured } = require('./datasecure')
 
 // knxultimate logs telegrams at 'info', which would flood hamon.log with what
 // hamon already logs itself - so 'info' maps to 'warn'
@@ -198,6 +203,8 @@ class UltimateConnection extends EventEmitter {
         if (this.client.sysLogger) clientLoggers.add(this.client.sysLogger.module)
         labelSharedLoggers()
         if (secure && Object.keys(secure.groupKeys).length > 0) this.groupKeys = secure.groupKeys
+        // Data Secure on a plain tunnel: knxultimate only decrypts on a secure one
+        if (!secure && options.dataSecure) this.dataSecure = new DataSecure(options.dataSecure)
 
         this.client.on('connected', () => {
             if (secure) this.checkGroupKeys()
@@ -303,6 +310,14 @@ class UltimateConnection extends EventEmitter {
             this.lastSeq = seq
         }
 
+        // a Data Secure telegram (S-A_Data): decrypted in place if we hold its
+        // key (on a secure tunnel knxultimate already has), else logged - it
+        // would otherwise be dropped below without a word
+        if (isSecured(cemi)) {
+            const r = this.dataSecure ? this.dataSecure.open(cemi) : { drop: 'no key' }
+            if (r !== 'decrypted') return this.securedDropped(cemi, r.drop)
+        }
+
         const npdu = cemi.npdu
         const evt = npdu.isGroupWrite ? 'GroupValue_Write'
             : npdu.isGroupResponse ? 'GroupValue_Response'
@@ -321,6 +336,20 @@ class UltimateConnection extends EventEmitter {
         this.emit(`${evt}_${dest}`, src, data)
         this.emit(evt, src, dest, data)
         this.emit('event', evt, src, dest, data)
+    }
+
+    // a Data Secure telegram we couldn't open: the first per GA and reason,
+    // then every 100th with a count (a replay or bad MAC is worth seeing; no
+    // key means the ETS project's keys aren't uploaded)
+    securedDropped(cemi, why) {
+        const key = `${cemi.dstAddress.toString()} ${why}`
+        this.securedSeen = this.securedSeen || new Map()
+        const n = (this.securedSeen.get(key) || 0) + 1
+        this.securedSeen.set(key, n)
+        if (n != 1 && n % 100 != 0) return
+        this.log.warn('DATASECURE %s %s from %s: %s - not stored%s', this.options.site || '', cemi.dstAddress.toString(),
+            cemi.srcAddress.toString(), why === 'no key' ? 'Data Secure telegram, no key for it' : `Data Secure telegram dropped (${why})`,
+            n > 1 ? ` (${n} so far)` : '')
     }
 
     write(grpaddr, value, dptid, callback) {

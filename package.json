@@ -25,7 +25,7 @@
   "scripts": {
     "lint": "eslint parsexml.js ./src",
     "postinstall": "patch-package",
-    "test": "node test/knxstack.test.js && node test/dptnames.test.js && node test/datapoint.test.js && node test/payload.test.js && node test/sitestate.test.js && node test/misconfig.test.js && node test/knxdesc.test.js && node test/dedupe.test.js && node test/tpcionly.test.js && node test/sharedlog.test.js && node test/addressrules.test.js && node test/unmapped.test.js && node test/crashbackoff.test.js"
+    "test": "node test/knxstack.test.js && node test/dptnames.test.js && node test/datapoint.test.js && node test/payload.test.js && node test/sitestate.test.js && node test/misconfig.test.js && node test/knxdesc.test.js && node test/dedupe.test.js && node test/tpcionly.test.js && node test/sharedlog.test.js && node test/addressrules.test.js && node test/unmapped.test.js && node test/crashbackoff.test.js && node test/datasecure.test.js"
   },
   "devDependencies": {
     "babel-eslint": "^10.1.0",

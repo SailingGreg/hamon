@@ -3,7 +3,8 @@
  *
  * hamon-upload keeps per-site secrets out of hamon.yml in .hamon-secrets.json
  * (mode 600, beside hamon.yml), keyed by site name. For a secure site it holds,
- * from the site's ETS project:
+ * from the site's ETS project (a project with Data Secure GAs but no secure
+ * gateway gives only configFile and groupKeys, used on a plain tunnel):
  *
  *   secure: { configFile, gateway, deviceAuthCode,
  *             tunnels: { '<ia>': { userId, password } },
@@ -58,4 +59,19 @@ function secureOptions(path, location) {
     }
 }
 
-module.exports = { siteSecure, secureOptions }
+// a plain-tunnel site's Data Secure group keys ({ '<ga>': base64 }), or
+// undefined if none are stored: its ETS project has Data Secure GAs but the
+// site doesn't use a KNX Secure tunnel (secure: true gets them with the
+// tunnel, see secureOptions). Throws if they're from another GA file
+function dataSecureKeys(path, location) {
+    const { name, config } = location
+    const entry = siteSecure(path, name)
+    const keys = (entry && entry.groupKeys) || {}
+    if (Object.keys(keys).length === 0) return undefined
+    if (entry.configFile !== config) {
+        throw new Error(`Data Secure keys are from ${entry.configFile}, site config is ${config} - re-upload the ETS project`)
+    }
+    return keys
+}
+
+module.exports = { siteSecure, secureOptions, dataSecureKeys }
