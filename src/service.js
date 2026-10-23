@@ -83,6 +83,13 @@ const RESTART_FREE = 3
 const BACKOFF_BASE = 15 * 60 * 1000 // 15min
 const BACKOFF_MAX = 4 * 60 * 60 * 1000 // 4h
 const failures = {} // consecutive restarts without a connection, by name
+// worker errors by name, and when the last was: a connection doesn't clear
+// them (a site that errors right after connecting would otherwise restart
+// with no delay, again and again), only CRASH_QUIET without one or a change
+// to its hamon.yml entry
+const CRASH_QUIET = 10 * 60 * 1000 // 10min
+const crashes = {}
+const crashAt = {}
 const everConnected = new Set() // sites that have connected since hamon started
 const pending = {} // back-off timers, by name
 const lastBlocked = {} // why a site was last blocked, until it connects or its config changes
@@ -107,6 +114,15 @@ function setState(name, state, extra = {}) {
     if (siteState == null) return
     siteState.set(name, state, { failures: failures[name] || 0, ...extra })
     saveState()
+}
+
+// a worker error: count it, and raise the restart count to it so the
+// restart backs off on repeated errors even though the site connected in between
+function noteCrash(name, now) {
+    if (now - (crashAt[name] || 0) > CRASH_QUIET) crashes[name] = 0
+    crashes[name] = (crashes[name] || 0) + 1
+    crashAt[name] = now
+    failures[name] = Math.max(failures[name] || 0, crashes[name] - 1)
 }
 
 function backoffDelay(count) {
@@ -210,7 +226,7 @@ function start_worker(path, influxver, loc, survey, stack, dedupe) {
                    precheck: needsPrecheck(siteState != null ? siteState.get(loc.name) : null),
                    failures: failures[loc.name] || 0,
                    survey: survey === true, // top-level `survey: true` in hamon.yml
-                   stack: effectiveStack(loc.stack, stack), // site's, else top-level, else knx
+                   stack: effectiveStack(loc.stack, stack), // top-level, else site's, else knx
                    dedupe: effectiveDedupe(loc.dedupe, dedupe), // ms: site's, else top-level, else 0 (off)
                    siblings: siblingsOf(loc) }
     const worker = useThreads ? new Worker(path + './src/connection.js', { workerData: data })
@@ -222,6 +238,7 @@ function start_worker(path, influxver, loc, survey, stack, dedupe) {
     // worker - restart just this site rather than taking down hamon
     worker.on('error', (err) => {
       logger.error(`Worker error: ${loc.name} - ${err}`)
+      noteCrash(loc.name, Date.now())
       requestRestart(loc.name);
     })
     worker.on('message', (data) => {
@@ -420,6 +437,7 @@ async function ConnectionService(firstrun, path, doc) {
                 if (configChanged) {
                     cancelPending(loc.name);
                     failures[loc.name] = 0;
+                    crashes[loc.name] = 0;
                     delete lastBlocked[loc.name];
                 }
 
@@ -606,3 +624,5 @@ async function runService(path, hamonConfig) {
 }
 
 module.exports.runService = runService
+// for test/crashbackoff.test.js
+module.exports._test = { noteCrash, backoffDelay, failures }

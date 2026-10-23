@@ -72,6 +72,16 @@ function localDate() {
 }
 const ctime = () => localDate().replace(/T/, ' ').replace(/\..+/, '')
 
+// a GA's datapoint; a DPT the decoder doesn't know (knx throws for e.g.
+// 27.001) gets one without a DPT and unsupported: true
+function buildEndpoint(Datapoint, ga, dpt, connection) {
+    try {
+        return { endpoint: new Datapoint({ ga, dpt }, connection), unsupported: false }
+    } catch (err) {
+        return { endpoint: new Datapoint({ ga, dpt: undefined }, connection), unsupported: true }
+    }
+}
+
 // location: the hamon.yml entry (plus path, influxver); opts: { stack,
 // connectedBefore, failures, survey, precheck, dedupe (ms, 0 = off) }; hooks: see the top
 function createSite(location, opts, hooks) {
@@ -156,7 +166,7 @@ function createSite(location, opts, hooks) {
 
     // build the datapoints the first time the tunnel comes up
     function initDatapoints() {
-        let cnt = 0, udefined = 0, remapped = 0, overridden = 0, added = 0
+        let cnt = 0, udefined = 0, remapped = 0, overridden = 0, added = 0, unsupported = 0
         // an exact-address rule with a dpt adds a GA the ETS export doesn't
         // have (e.g. added to the project after the export); the loop below
         // then applies the rule to it like any other
@@ -189,8 +199,20 @@ function createSite(location, opts, hooks) {
             // stored. 3.007 (dimming) is the usual bare DPT3; DPT3 and DPT18
             // decode to objects, so they reach dbv2's composite (DBSKIP) path
             if (DEFAULT_SUBTYPE[ga.dpt] !== undefined) ga.dpt += DEFAULT_SUBTYPE[ga.dpt]
-            // construct dp for the group address (still done for undefined DPTs)
-            ga.endpoint = new Datapoint({ ga: key, dpt: ga.dpt }, connection)
+            // construct dp for the group address (still done for undefined DPTs).
+            // A DPT the decoder doesn't know (e.g. 27.001 on knx) throws: the
+            // GA is kept without a DPT, its telegrams logged as UNMAPPED, rather
+            // than the error ending the site - which then restarts, reconnects
+            // and fails the same way
+            const built = buildEndpoint(Datapoint, key, ga.dpt, connection)
+            ga.endpoint = built.endpoint
+            if (built.unsupported) {
+                log.warn('UNSUPPORTED %s %s (%s): %s not decoded by %s - not stored', name, key, ga.name,
+                    ga.dpt, decoder)
+                ga.unsupported = ga.dpt
+                ga.dpt = undefined
+                unsupported++
+            }
             ga.endpoint.on('invalid', (src, buf, reason) => logInvalid(key, ga, src, buf, reason))
             // name and unit from hamon's own table, not the KNX library
             const info = dptInfo(ga.dpt)
@@ -203,8 +225,9 @@ function createSite(location, opts, hooks) {
             }
             cnt++
         }
-        log.info('GA for %s: %j (%d undefined/%d remapped/%d overridden/%d added)',
-                    name, cnt, udefined, remapped, overridden, added)
+        log.info('GA for %s: %j (%d undefined/%d remapped/%d overridden/%d added%s)',
+                    name, cnt, udefined, remapped, overridden, added,
+                    unsupported > 0 ? `/${unsupported} unsupported by ${decoder}` : '')
     }
 
     // a telegram hamon can't store because its GA isn't mapped: not in the
@@ -272,7 +295,8 @@ function createSite(location, opts, hooks) {
             if (dedupe) dedupe.push(dest, ga.endpoint.current_value, args)
             else writeEvent(...args)
         } else {
-            logUnmapped(evt, dest, src, value, `no DPT for "${ga.name}"`)
+            logUnmapped(evt, dest, src, value, ga.unsupported !== undefined
+                ? `${ga.unsupported} not decoded by ${decoder} for "${ga.name}"` : `no DPT for "${ga.name}"`)
         }
     }
 
@@ -446,4 +470,4 @@ function createSite(location, opts, hooks) {
     return { name, start, stop: exit }
 }
 
-module.exports = { createSite }
+module.exports = { createSite, buildEndpoint }

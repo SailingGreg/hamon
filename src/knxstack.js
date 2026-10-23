@@ -1,6 +1,6 @@
 /*
- * knxstack.js - pick the KNX stack for a location (hamon.yml `stack:`; the
- * top-level `stack:` is the default for every location, see effective())
+ * knxstack.js - pick the KNX stack for a location (hamon.yml `stack:`; a
+ * top-level `stack:` applies to every location, see effective())
  *
  *   knx          (default) the knx 2.4.1 package, as before
  *   knxultimate  KNXUltimate for the transport (UDP now; TCP / KNX Secure later),
@@ -32,10 +32,11 @@ module.exports = function (stack) {
     throw new Error(`unknown knx stack '${stack}' (use knx or knxultimate)`)
 }
 
-// the stack a location runs on: its own `stack:`, else the top-level `stack:`
-// in hamon.yml, else knx
+// the stack a location runs on: the top-level `stack:` in hamon.yml, else its
+// own `stack:`, else knx. A top-level stack is every site's - a site's own
+// can't put it back on knx (hamon-upload drops the line, its checker flags it)
 module.exports.effective = function (siteStack, defaultStack) {
-    for (const s of [siteStack, defaultStack]) {
+    for (const s of [defaultStack, siteStack]) {
         if (s != null && s !== '') return s
     }
     return 'knx'

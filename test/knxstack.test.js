@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*
  * knxstack.test.js - the stack a location runs on (knxstack.effective):
- * its own `stack:`, else the top-level `stack:` in hamon.yml, else knx.
+ * the top-level `stack:` in hamon.yml, else its own `stack:`, else knx.
  */
 const assert = require('assert')
 const effective = require('../src/knxstack').effective
@@ -12,9 +12,10 @@ const cases = [
     ['', null, 'knx'],
     [undefined, 'knxultimate', 'knxultimate'],
     ['', 'knxultimate', 'knxultimate'],
-    ['knx', 'knxultimate', 'knx'],          // a site held back on knx
+    ['knx', 'knxultimate', 'knxultimate'],  // a top-level stack is every site's
     ['knxultimate', undefined, 'knxultimate'],
-    ['knxultimate', 'knx', 'knxultimate'],
+    ['knxultimate', 'knx', 'knx'],
+    ['knx', undefined, 'knx'],              // no top-level: a site's own applies
 ]
 for (const [site, top, want] of cases) {
     assert.strictEqual(effective(site, top), want, `site ${site}, top-level ${top}`)
