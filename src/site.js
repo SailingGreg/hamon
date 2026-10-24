@@ -27,7 +27,7 @@ const { writeEventsv2 } = require('./dbv2')
 const { MQTTconnect, mqdisconnect } = require('./mqwrite')
 const { loadmapping, mapstring, mapaddress, addressRules } = require('./strtodpt')
 const { dptInfo } = require('./dptnames')
-const { secureOptions } = require('./secrets')
+const { secureOptions, dataSecureKeys } = require('./secrets')
 const { describe } = require('./knxdesc')
 const { createDedupe } = require('./dedupe')
 const knxstack = require('./knxstack')
@@ -300,7 +300,7 @@ function createSite(location, opts, hooks) {
         }
     }
 
-    function connect(knxAddr, secureTunnel) {
+    function connect(knxAddr, secureTunnel, dataSecure) {
         connection = knx.Connection({
             ipAddr: knxAddr,
             ipPort: port,
@@ -311,6 +311,7 @@ function createSite(location, opts, hooks) {
             site: name,             // knxultimate only: labels the library's own lines
             log,                    // knxultimate only: the shim's lines
             secure: secureTunnel,   // knxultimate only; undefined = plain tunnelling
+            dataSecure,             // knxultimate only: group keys for a plain tunnel
             loglevel: quietRetries ? 'error' : logging,
             handlers: {
                 connected: guard(function () {
@@ -364,13 +365,22 @@ function createSite(location, opts, hooks) {
         // matching the site throws), the GA file and the dpt mappings. A
         // problem here won't go away on a retry, so stop and say why;
         // service.js marks the site misconfigured until its config changes
-        let secureTunnel
+        let secureTunnel, dataSecure
         try {
             if (secure === true) {
                 secureTunnel = secureOptions(path, { ...location, stack: siteStack })
                 log.info('%s: KNX Secure tunnel %s (user %d) on gateway %s, %d Data Secure GA(s)', name,
                     secureTunnel.tunnelIA, secureTunnel.userId, secureTunnel.gateway,
                     Object.keys(secureTunnel.groupKeys).length)
+            } else {
+                // Data Secure GAs on a plain tunnel: decrypted in the shim (datasecure.js)
+                dataSecure = dataSecureKeys(path, location)
+                if (dataSecure !== undefined) {
+                    if (siteStack !== 'knxultimate') {
+                        throw new Error(`Data Secure keys stored but the site runs on ${siteStack || 'knx'} - they need stack knxultimate`)
+                    }
+                    log.info('%s: plain tunnel, %d Data Secure GA(s) decrypted', name, Object.keys(dataSecure).length)
+                }
             }
             if (!config) throw new Error('no config: (GA file) in hamon.yml')
             // a .knxproj site reads its .json, which throws if it's missing
@@ -413,7 +423,7 @@ function createSite(location, opts, hooks) {
             }
         }
         try {
-            connect(knxAddr, secureTunnel)
+            connect(knxAddr, secureTunnel, dataSecure)
         } catch (err) {
             finish(hooks.error, err)
         }
