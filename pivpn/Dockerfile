@@ -1,6 +1,7 @@
-# Pi-VPN OpenVPN server for hamon (see setup.sh).  Alpine 3.20 = OpenVPN 2.6,
-# the same base as the openvpn-tunv2 client image.
-FROM alpine:3.20
+# Pi-VPN OpenVPN server for hamon (see setup.sh).  Alpine 3.23: OpenVPN 2.6
+# with OpenSSL 3.5 (LTS series); 3.20, the openvpn-tunv2 client image's base,
+# went out of support in April 2026.
+FROM alpine:3.23
 
 # the server drops to this uid after start-up; it should own the host's data
 # directory so config, PKI and ccd stay private to that user (and its backup)
