@@ -6,14 +6,21 @@
 # renegotiation works across Gira's relay (the S1's, or ours with reneg-sec):
 # data stops until the relay resets the session ~5 min later. A soft restart
 # (SIGUSR1) before then starts a fresh session instead: the tunnel is back in
-# ~5 s with tun0 and its routes kept, and hamon's KNX tunnel rides through it.
+# ~5 s with tun0 and its routes kept, and hamon's KNX tunnel usually rides
+# through it. When a telegram arrives while the VPN is down, though, the S1
+# gets no TUNNELLING_ACK and, as ISO 22510 5.4.2.6 requires, repeats it once
+# and closes the KNX connection - its DISCONNECT_REQUEST is lost with the VPN,
+# so hamon only finds out from its next heartbeat (up to 60 s later, answered
+# E_CONNECTION_ID). So once the tunnel is back, the script asks hamon (kpipe
+# "check <site>") to send that heartbeat at once.
 #
 # Run from cron every minute. For each container, the connection's age is
 # read from its last "Initialization Sequence Completed" line, so an
 # unplanned reconnect simply restarts the clock.
 #
-# usage: vpn-reconnect.sh [-n] <max-minutes> <container> ...
+# usage: vpn-reconnect.sh [-n] <max-minutes> <container>[:<site>] ...
 #   -n   dry run: say what would be done
+#   <site> is the hamon.yml site name, if it isn't the container's
 #
 # One line per reconnect (or problem) on stdout; nothing when all is well.
 #
@@ -28,8 +35,13 @@ if [ "$#" -lt 2 ]; then
 fi
 MAXMIN=$1; shift
 
+KPIPE="$(cd "$(dirname "$0")/.." && pwd)/tmp/kpipe"
+UP_WAIT=30   # seconds to wait for the tunnel to come back
+
 now=$(date +%s)
-for c in "$@"; do
+for arg in "$@"; do
+    c=${arg%%:*}
+    site=${arg#*:}
     stamp="$(date '+%F %T')"
     # container log times are UTC (the containers run without a TZ)
     last=$(docker exec "$c" grep "Initialization Sequence Completed" /var/log/openvpn.log 2>/dev/null |
@@ -46,9 +58,23 @@ for c in "$@"; do
         echo "$stamp $c: connected ${age} min (since $last UTC) - would reconnect"
         continue
     fi
-    if docker exec "$c" pkill -USR1 -x openvpn; then
-        echo "$stamp $c: connected ${age} min (since $last UTC) - reconnect (SIGUSR1)"
-    else
+    before=$(docker exec "$c" grep -c "Initialization Sequence Completed" /var/log/openvpn.log)
+    if ! docker exec "$c" pkill -USR1 -x openvpn; then
         echo "$stamp $c: connected ${age} min - SIGUSR1 failed"
+        continue
+    fi
+    echo "$stamp $c: connected ${age} min (since $last UTC) - reconnect (SIGUSR1)"
+    for ((i = 0; i < UP_WAIT; i++)); do
+        sleep 1
+        n=$(docker exec "$c" grep -c "Initialization Sequence Completed" /var/log/openvpn.log)
+        [ "$n" -gt "$before" ] && break
+    done
+    if [ "$n" -le "$before" ]; then
+        echo "$(date '+%F %T') $c: tunnel not back after ${UP_WAIT} s - no hamon check"
+    elif [ ! -p "$KPIPE" ]; then
+        echo "$(date '+%F %T') $c: tunnel back after $((i + 1)) s; no $KPIPE - is ha-mon running?"
+    else
+        echo "check $site" > "$KPIPE"
+        echo "$(date '+%F %T') $c: tunnel back after $((i + 1)) s - asked hamon to check $site"
     fi
 done

@@ -477,7 +477,20 @@ function createSite(location, opts, hooks) {
         return stop()
     }
 
-    return { name, start, stop: exit }
+    // a connection check asked for by service.js (kpipe "check <site>", e.g.
+    // from utils/vpn-reconnect.sh after a planned VPN reconnect): ask the
+    // gateway whether our tunnel is still there now, not at the next heartbeat
+    function check() {
+        if (connection == null) return log.info('%s Check: %s not connected - nothing to check', ctime(), name)
+        if (typeof connection.checkNow !== 'function') {
+            return log.info('%s Check: %s - stack %s has no connection check', ctime(), name, siteStack || 'knx')
+        }
+        const why = connection.checkNow()
+        if (why) log.info('%s Check: %s - not checked: %s', ctime(), name, why)
+        else log.info('%s Check: %s - connection state requested', ctime(), name)
+    }
+
+    return { name, start, stop: exit, check }
 }
 
 module.exports = { createSite, buildEndpoint }

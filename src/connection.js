@@ -11,6 +11,8 @@
  *                                           misconfigured ('config')
  *   name                                    timed out: restart with back-off
  *   an uncaught error                       worker 'error': restart
+ * and from service.js: { exit: true } (stop) and { check: true } (kpipe
+ * "check <site>": ask the gateway about the tunnel now)
  */
 const { workerData, parentPort } = require('worker_threads')
 const { createSite } = require('./site')
@@ -53,6 +55,7 @@ const site = createSite(workerData.location, workerData, {
 // exit if signaled
 parentPort.on('message', (value) => {
     if (value && value.exit) site.stop().then(() => process.exit(0))
+    else if (value && value.check) site.check()
 })
 
 site.start().catch((err) => { setImmediate(() => { throw err }) })
