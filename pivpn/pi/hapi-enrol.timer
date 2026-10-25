@@ -1,0 +1,10 @@
+[Unit]
+Description=hapi-enrol every 2 minutes until the box has its VPN profile
+ConditionPathExists=!/etc/openvpn/client/pivpn.conf
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target

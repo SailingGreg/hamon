@@ -2,7 +2,11 @@
 #
 # hapi-image.sh  -  build the HAMON site box image, on devserver (arm64).
 #
-#   ./hapi-image.sh [<raspios-lite-arm64.img.xz>]
+#   ./hapi-image.sh [--publish] [<raspios-lite-arm64.img.xz>]
+#
+#   --publish   also upload it to prod's download area (/hapi-image/, one login
+#               per integrator: pivpn/prod/hapi-image-user.sh), keeping the
+#               newest two there
 #
 # Takes the official Raspberry Pi OS Lite 64-bit image (the latest from
 # downloads.raspberrypi.com, checked against its SHA-256 and cached, unless a
@@ -40,6 +44,8 @@ STAMP=$(date +%Y%m%d)
 NAME="hamon-hapi-$STAMP"
 
 die() { echo "hapi-image: $*" >&2; exit 1; }
+PUBLISH=0
+if [ "${1:-}" = --publish ]; then PUBLISH=1; shift; fi
 step() { echo "== $*"; }
 [ "$(uname -m)" = aarch64 ] || die "build on an arm64 machine (devserver): the chroot runs the image's own binaries"
 PATH=$PATH:/usr/sbin:/sbin
@@ -179,6 +185,12 @@ cat >"$OUT/os_list.json" <<EOF
   ]
 }
 EOF
+if [ "$PUBLISH" = 1 ]; then
+    step "publish to $PROD:/var/www/hapi-image"
+    scp -q "$OUT/$NAME.img.xz" "$OUT/$NAME.img.xz.sha256" "$PROD:/var/www/hapi-image/" || die "upload failed"
+    ssh "$PROD" 'cd /var/www/hapi-image && ls -1t hamon-hapi-*.img.xz | tail -n +3 | while read -r f; do rm -f "$f" "$f.sha256"; done; ls -l'
+    echo "   https://${PROD#*@}/hapi-image/$NAME.img.xz"
+fi
 echo
 echo "image: $OUT/$NAME.img.xz ($(( size / 1048576 )) MB; $(cut -c1-16 "$OUT/$NAME.img.xz.sha256")...)"
 echo "next:  write it with Raspberry Pi Imager (Use custom), boot a bench Pi, ./hapi-build.sh <ip>"

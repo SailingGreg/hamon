@@ -1,0 +1,18 @@
+# /etc/systemd/system/hapi-enrol.service on prod (pivpn/prod/install.sh)
+[Unit]
+Description=hapi-enrol: enrolment endpoint for site boxes from the HAMON image
+After=network.target
+
+[Service]
+User=greg
+Group=greg
+ExecStart=/usr/bin/python3 /home/greg/hamon/pivpn/hapi-enrol-server.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/home/greg/pivpn/enrol
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

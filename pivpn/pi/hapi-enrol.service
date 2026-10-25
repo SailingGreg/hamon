@@ -1,0 +1,11 @@
+[Unit]
+Description=hapi-enrol: ask the HAMON server to take this box on (HAMON image)
+Wants=network-online.target
+After=network-online.target time-sync.target
+ConditionPathExists=!/etc/openvpn/client/pivpn.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hapi-enrol
+# an approved box waits up to 2 min for its VPN in hapi-vpn-swap
+TimeoutStartSec=5min

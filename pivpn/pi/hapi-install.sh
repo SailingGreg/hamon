@@ -37,7 +37,7 @@ if live; then
     IFS= read -r CODE || true
     [ -n "${PW:-}" ] && [ -n "${CODE:-}" ] || { echo "hapi-install: the password and setup code go on stdin" >&2; exit 1; }
 fi
-for f in hapi-hostname.sh hapi-hostname.service hapi-vpn-swap.sh hapi-agent.py hapi-agent.service hapi-agent.timer \
+for f in hapi-hostname.sh hapi-hostname.service hapi-vpn-swap.sh hapi-enrol.py hapi-enrol.service hapi-enrol.timer hapi-agent.py hapi-agent.service hapi-agent.timer \
          hapi-agent.conf.example hapi-setup.py hapi-setup.service hapi.sudoers authorized_keys; do
     [ -f "$f" ] || { echo "hapi-install: $f missing" >&2; exit 1; }
 done
@@ -52,7 +52,7 @@ apt-get -qq update
 # --no-upgrade: on a deployed Pi (re-run over the VPN) an openvpn upgrade
 # would restart the tunnel under us; unattended-upgrades does upgrades
 apt-get -qq -y --no-upgrade install openvpn iptables-persistent conntrack fake-hwclock unattended-upgrades \
-    avahi-daemon python3 >/dev/null
+    avahi-daemon python3 openssl >/dev/null
 
 step "hostname (hapi-<eth0 MAC>)"
 install -m 755 hapi-hostname.sh /usr/local/sbin/
@@ -157,13 +157,18 @@ fi
 step "VPN profile switcher (hapi-vpn-swap: falls back to the previous profile)"
 install -m 755 hapi-vpn-swap.sh /usr/local/sbin/hapi-vpn-swap
 
+step "enrolment (hapi-enrol: on in the HAMON image only, until the box has its VPN)"
+install -m 755 hapi-enrol.py /usr/local/sbin/hapi-enrol
+install -m 644 hapi-enrol.service hapi-enrol.timer /etc/systemd/system/
+# the standard route gets its profile from hapi-assign: the timer stays off there
+
 step "IP forwarding"
 echo net.ipv4.ip_forward=1 >/etc/sysctl.d/90-pivpn.conf
 live && sysctl -q --system
 
 step services
 if ! live; then
-    systemctl enable -q hapi-agent.timer
+    systemctl enable -q hapi-agent.timer hapi-enrol.timer
     echo "hapi-install: image done (setup page enabled at adoption)"
     exit 0
 fi
