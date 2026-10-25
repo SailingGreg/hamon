@@ -24,8 +24,9 @@
 #               machine's key with ssh-copy-id (prompts, or SSHPASS=<password>)
 #   -n          new password and setup code
 #   --ship      instead of building: clear the bench state before it goes to
-#               site (gateway choice, forward, Wi-Fi profiles) and re-check
-#               the sudo lock-down
+#               site (gateway choice, forward, Wi-Fi profiles, the bench Wi-Fi
+#               and Imager passwords in the boot partition's cloud-init seed)
+#               and re-check the sudo lock-down
 #
 # PROD (default greg@home.monitor-software.com) is where prod's key comes from.
 #
@@ -126,7 +127,16 @@ if [ "$SHIP" = 1 ]; then
             nmcli -t -f NAME,TYPE connection show | awk -F: "\$2 ~ /wireless/ {print \$1}" |
                 while read -r c; do nmcli connection delete "$c" >/dev/null && echo "removed Wi-Fi profile $c"; done
         fi
-        echo "bench gateway choice and forward cleared"' </dev/null
+        # Imager'"'"'s cloud-init seed holds the bench Wi-Fi password and the
+        # Imager user'"'"'s password hash: wired DHCP only, nothing else
+        if [ -f /boot/firmware/network-config ]; then
+            printf "%s\n" "network:" "  version: 2" "  ethernets:" "    eth0:" "      dhcp4: true" "      optional: true" >/boot/firmware/network-config
+        fi
+        if [ -f /boot/firmware/user-data ]; then
+            printf "%s\n" "#cloud-config" "# cleared by hapi-build.sh --ship; cloud-init is disabled on this box" >/boot/firmware/user-data
+        fi
+        [ -d /etc/cloud ] && touch /etc/cloud/cloud-init.disabled
+        echo "bench gateway choice and forward cleared; Imager seed scrubbed"' </dev/null
 else
     # --- build -------------------------------------------------------------------
     if [ "$NEWSECRETS" = 1 ] || [ -z "$PW" ] || [ -z "$CODE" ]; then

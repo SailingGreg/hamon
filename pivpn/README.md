@@ -46,8 +46,11 @@ OS Lite 64-bit (Bookworm or Trixie; a Pi 3B+ or later) and a network.
    through the tunnel and copies the register to prod. It prints the hamon-upload values:
    `dns 10.86.0.N`, port 3671.
 5. **Ship:** on Ethernet, `./hapi-build.sh --ship <ip>` clears the bench gateway choice and
-   forward, removes Wi-Fi profiles (it refuses while the Pi is still on Wi-Fi) and re-checks
-   the lock-down. Print the label.
+   forward, removes Wi-Fi profiles (it refuses while the Pi is still on Wi-Fi), scrubs
+   Imager's cloud-init seed on the boot partition (on Trixie it holds the bench Wi-Fi
+   password and the Imager user's password hash; the build already disabled cloud-init) and
+   re-checks the lock-down. Run it via the Pi's Ethernet address, not its Wi-Fi one. Print
+   the label.
 
 The box name identifies the hardware; the VPN client name is the site (e.g. site X uses
 hapi-1a2b3c). In hamon-upload set the site's address to `10.86.0.N`, port `3671`, and keep

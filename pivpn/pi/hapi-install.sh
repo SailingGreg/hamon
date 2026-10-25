@@ -105,6 +105,14 @@ chmod 640 /etc/hapi/setup-code
 visudo -qcf hapi.sudoers
 install -m 440 hapi.sudoers /etc/sudoers.d/hapi
 
+step "cloud-init off (Imager's first-boot seed has done its job)"
+# on Trixie Imager seeds cloud-init (/boot/firmware/user-data, network-config):
+# left on, a re-run could recreate the Imager user with its password and turn
+# ssh password login back on. The network it set up stays (NetworkManager)
+if [ -d /etc/cloud ]; then
+    touch /etc/cloud/cloud-init.disabled
+fi
+
 step "IP forwarding"
 echo net.ipv4.ip_forward=1 >/etc/sysctl.d/90-pivpn.conf
 sysctl -q --system
