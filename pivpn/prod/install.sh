@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 site=/etc/nginx/sites-available/grafana.conf
 
 # enrolment service
-install -d -m 700 ~/pivpn/enrol ~/pivpn/enrol/pending ~/pivpn/enrol/approved
+install -d -m 700 ~/pivpn/enrol ~/pivpn/enrol/pending ~/pivpn/enrol/approved ~/pivpn/enrol/refused
 sudo install -m 644 hapi-enrol.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable -q hapi-enrol

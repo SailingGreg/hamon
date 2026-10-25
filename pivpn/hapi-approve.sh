@@ -5,6 +5,10 @@
 #   ./hapi-approve.sh --list                 boxes waiting for approval
 #   ./hapi-approve.sh [-i N] [-y] <box> <site>
 #   ./hapi-approve.sh --reject <box>         drop a pending request
+#   ./hapi-approve.sh --forget [-y] <box>    a new card in an enrolled box: revoke the
+#                                            old one, free its address, clear the approval
+#                                            (the register row and its secrets stay, so
+#                                            the label stays valid)
 #
 # A box written from the HAMON image enrols itself at first boot: it makes its
 # own VPN key (which never leaves it) and sends a certificate request to the
@@ -36,20 +40,65 @@ die() { echo "hapi-approve: $*" >&2; exit 1; }
 . "$HERE/hapi-register.sh"
 
 if [ "${1:-}" = --list ]; then
-    ssh "${SSHOPT[@]}" "$PROD" 'cd ~/pivpn/enrol/pending 2>/dev/null || { echo "no enrolment data on prod"; exit 0; }
-        ls *.json >/dev/null 2>&1 || { echo "nothing pending"; exit 0; }
-        python3 -c "
-import glob, json
-print(\"%-12s %-17s %-16s %-19s %-19s %s\" % (\"BOX\", \"MAC\", \"FROM\", \"FIRST SEEN\", \"LAST SEEN\", \"MODEL / IMAGE\"))
-for p in sorted(glob.glob(\"*.json\")):
+    ssh "${SSHOPT[@]}" "$PROD" python3 - <<'PYEOF'
+import glob, json, os, time
+base = os.path.expanduser("~/pivpn/enrol")
+pending = sorted(glob.glob(base + "/pending/*.json"))
+print("Pending (approve: hapi-approve.sh <box> <site>):")
+if not pending:
+    print("  none")
+for p in pending:
     d = json.load(open(p))
-    print(\"%-12s %-17s %-16s %-19s %-19s %s / %s\" % (d[\"box\"], d[\"mac\"], d[\"addr\"], d[\"first_seen\"], d[\"last_seen\"], d.get(\"model\", \"\"), d.get(\"image\", \"\")))
-"'
+    print("  %-12s %-17s from %-15s first %s, last %s, %s / %s" % (d["box"], d["mac"], d["addr"], d["first_seen"], d["last_seen"], d.get("model", ""), d.get("image", "")))
+recent = [p for p in sorted(glob.glob(base + "/refused/*.json")) if time.time() - os.path.getmtime(p) < 7 * 86400]
+if recent:
+    print("Refused in the last 7 days:")
+    for p in recent:
+        d = json.load(open(p))
+        print("  %-12s %-17s from %-15s %dx, last %s: %s" % (d["box"], d["mac"], d["addr"], d.get("count", 1), d["last_seen"], d["reason"]))
+PYEOF
     exit 0
 fi
 if [ "${1:-}" = --reject ]; then
     [ "$#" -eq 2 ] && [[ $2 =~ ^hapi-[0-9a-f]{6}$ ]] || die "usage: $0 --reject <hapi-xxxxxx>"
     ssh "${SSHOPT[@]}" "$PROD" "rm -v ~/pivpn/enrol/pending/$2.json" || die "nothing pending for $2"
+    exit 0
+fi
+
+if [ "${1:-}" = --forget ]; then
+    shift
+    FYES=0
+    if [ "${1:-}" = -y ]; then FYES=1; shift; fi
+    [ "$#" -eq 1 ] && [[ $1 =~ ^hapi-[0-9a-f]{6}$ ]] || die "usage: $0 --forget [-y] <hapi-xxxxxx>"
+    BOX=$1
+    done=$(ssh "${SSHOPT[@]}" "$PROD" "cat ~/pivpn/enrol/approved/$BOX.json" 2>/dev/null) || die "$BOX has no approval to forget"
+    read -r fsite fip < <(python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["site"], d["ip"])' <<<"$done")
+    echo "$BOX: approved for $fsite ($fip). Forgetting it revokes that VPN certificate (the card now in"
+    echo "the box loses its VPN), frees $fip and clears the approval, so a new card in this box can enrol."
+    echo "The register row stays: the new card is adopted with the same password and setup code (label still valid)."
+    if [ "$FYES" != 1 ]; then
+        [ -t 0 ] || die "confirm with --forget -y when not run from a terminal"
+        read -rp "Forget $BOX ($fsite)? [y/N] " ok
+        [[ $ok =~ ^[Yy] ]] || die "not forgotten"
+    fi
+    ssh "${SSHOPT[@]}" "$PROD" bash -s -- "$BOX" "$fsite" "$fip" <<'PRODEOF'
+set -eu
+box=$1 site=$2 ip=$3 P=~/pivpn
+days=$(( ($(date -u -d "$(openssl x509 -noout -enddate -in "$P/pki/ca.crt" | cut -d= -f2)" +%s) - $(date +%s)) / 86400 - 1 ))
+E=(docker exec --user "$(id -u)" -e EASYRSA_PKI=/etc/pivpn/pki -e EASYRSA_BATCH=1 -e EASYRSA_CRL_DAYS="$days" pivpn-server)
+if [ -f "$P/pki/issued/$site.crt" ]; then
+    "${E[@]}" /usr/share/easy-rsa/easyrsa revoke "$site" >/dev/null
+    "${E[@]}" /usr/share/easy-rsa/easyrsa gen-crl >/dev/null
+    echo "$site: certificate revoked (CRL to the CA's expiry)"
+fi
+rm -f "$P/ccd/$site" "$P/clients/$site.tc2" "$P/enrol/approved/$box.json" "$P/enrol/approved/$box.ovpn" "$P/enrol/refused/$box.json"
+ssh-keygen -R "$ip" >/dev/null 2>&1 || true
+echo "$box: approval cleared, $ip free"
+PRODEOF
+    ssh-keygen -R "$fip" >/dev/null 2>&1 || true
+    reg_assign "$BOX" "" "" "Forgotten $(date +%F) (was $fsite $fip), awaiting a new card"
+    reg_push
+    echo "a new card in $BOX asks to enrol within 2 minutes of boot: hapi-approve.sh --list"
     exit 0
 fi
 
@@ -144,7 +193,9 @@ done
 echo "$BOX: on the VPN after ~$(( $(date -u +%s) - since )) s"
 
 # --- 3. adopt over the VPN ------------------------------------------------------------
-ssh-keygen -R "$IP" >/dev/null 2>&1 || true      # a box reusing an address has new host keys
+# a box reusing an address has new host keys: here, and on prod (hapi-collect)
+ssh-keygen -R "$IP" >/dev/null 2>&1 || true
+ssh "${SSHOPT[@]}" "$PROD" "ssh-keygen -R $IP" >/dev/null 2>&1 || true
 "$HERE/hapi-build.sh" "$IP"
 
 # --- 4. register -------------------------------------------------------------------

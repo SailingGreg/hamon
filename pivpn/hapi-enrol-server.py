@@ -33,6 +33,7 @@ from urllib.parse import parse_qs, urlparse
 
 DATA = os.environ.get("HAPI_ENROL_DIR", os.path.expanduser("~/pivpn/enrol"))
 PENDING, APPROVED = os.path.join(DATA, "pending"), os.path.join(DATA, "approved")
+REFUSED = os.path.join(DATA, "refused")   # the last refused request per box, for --list
 LISTEN = ("127.0.0.1", int(os.environ.get("HAPI_ENROL_PORT", "8095")))
 MAX_BODY = 16 * 1024
 MAX_PENDING = 50          # a flood of fake requests can't fill the disk
@@ -65,6 +66,16 @@ def save(path, obj):
     with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
         json.dump(obj, f, indent=1)
     os.replace(tmp, path)
+
+
+def refused(box, mac, addr, reason, model="", image=""):
+    """Keep the last refused (well-formed) request per box: a replaced card on
+    an enrolled box shows up in hapi-approve --list instead of only here."""
+    path = os.path.join(REFUSED, box + ".json")
+    cur = load(path) or {"count": 0, "first_seen": time.strftime("%F %T")}
+    cur.update(box=box, mac=mac, addr=addr, reason=reason, model=model, image=image,
+               last_seen=time.strftime("%F %T"), count=cur.get("count", 0) + 1)
+    save(path, cur)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -118,6 +129,7 @@ class Handler(BaseHTTPRequestHandler):
             if hmac.compare_digest(done.get("secret_sha256", ""), h):
                 return self.reply(200, {"state": "approved"})
             log("%s: request with another secret for an approved box, from %s" % (box, self.addr()))
+            refused(box, mac, self.addr(), "already enrolled (a new card? hapi-approve --forget)", model, image)
             return self.reply(409, {"error": "box already enrolled"})
 
         path = os.path.join(PENDING, box + ".json")
@@ -125,6 +137,7 @@ class Handler(BaseHTTPRequestHandler):
         if cur is not None:
             if not hmac.compare_digest(cur.get("secret_sha256", ""), h):
                 log("%s: request with another secret from %s - refused (pending one kept)" % (box, self.addr()))
+                refused(box, mac, self.addr(), "another request for this box is pending", model, image)
                 return self.reply(409, {"error": "another request for this box is pending"})
             cur.update(last_seen=now, last_addr=self.addr(), image=image or cur.get("image", ""))
             save(path, cur)
@@ -162,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    for d in (DATA, PENDING, APPROVED):
+    for d in (DATA, PENDING, APPROVED, REFUSED):
         os.makedirs(d, mode=0o700, exist_ok=True)
     srv = ThreadingHTTPServer(LISTEN, Handler)
     log("hapi-enrol listening on %s:%d, data %s" % (LISTEN[0], LISTEN[1], DATA))

@@ -13,6 +13,13 @@
 #
 # The caller sets REGISTER, PROD, SSHOPT (prod) and PIOPT (the Pi) and defines die().
 
+# these scripts run from the dev Pi (devserver), where the register's master copy
+# lives; prod holds only a backup copy, and reaches itself by no ssh key
+if [ -d "$HOME/pivpn/pki" ]; then
+    echo "${0##*/}: run this from the dev Pi (devserver: cd ~/hamon && pivpn/${0##*/}), not on prod" >&2
+    exit 1
+fi
+
 # a device row's field: 2 = MAC, 3 = site, 4 = tunnel IP, 6 = password, 7 = setup code
 reg_field() {
     [ -f "$REGISTER" ] || return 0
