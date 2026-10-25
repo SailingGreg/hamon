@@ -16,6 +16,9 @@
 # name is the VPN client name; use the hamon.yml name.
 #
 #   -i <N>   use 10.86.0.N instead of the next free address
+#   -r       renew the site's certificate (to the CA's expiry, at most 10
+#            years); the old one is revoked once the Pi has connected with
+#            the new one
 #
 # PROD (default greg@home.monitor-software.com): the Pi-VPN server.
 #
@@ -28,9 +31,15 @@ REGISTER="${REGISTER:-$HAMON/docs/hapi-devices.md}"
 PROD="${PROD:-greg@home.monitor-software.com}"
 SSHOPT=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
 
-WANT=""
-if [ "${1:-}" = -i ]; then WANT=$2; shift 2; fi
-[ "$#" -eq 2 ] || { echo "usage: $0 [-i <N>] <pi-address> <site>" >&2; exit 2; }
+WANT="" RENEW=0
+while [ "$#" -gt 2 ]; do
+    case "$1" in
+        -i) WANT=$2; shift 2 ;;
+        -r) RENEW=1; shift ;;
+        *) break ;;
+    esac
+done
+[ "$#" -eq 2 ] || { echo "usage: $0 [-i <N>] [-r] <pi-address> <site>" >&2; exit 2; }
 PI=$1 SITE=$2
 die() { echo "hapi-assign: $*" >&2; exit 1; }
 [[ $SITE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "site names are letters, digits, _ . and - only"
@@ -46,9 +55,9 @@ PW=$(reg_field "$DEV" 6)
 echo "$PI: $DEV"
 
 # --- prod: address and profile -----------------------------------------------
-IP=$(ssh "${SSHOPT[@]}" "$PROD" bash -s -- "$SITE" "$WANT" <<'EOF'
+IP=$(ssh "${SSHOPT[@]}" "$PROD" bash -s -- "$SITE" "$WANT" "$RENEW" <<'EOF'
 set -eu
-site=$1 want=$2
+site=$1 want=$2 renew=$3
 ccd=~/pivpn/ccd
 if [ -f "$ccd/$site" ]; then
     ip=$(awk '/^ifconfig-push/ {print $2}' "$ccd/$site")
@@ -64,7 +73,16 @@ else
     fi
     ip=10.86.0.$n
 fi
-docker exec --user "$(id -u)" pivpn-server pivpn-add "$site" "$ip" "10.100.${ip##*.}.0" >&2
+# to the CA's expiry, at most 10 years (pivpn-add does the same from the
+# next image build on; set here for an older image)
+days=$(( ($(date -u -d "$(openssl x509 -noout -enddate -in ~/pivpn/pki/ca.crt | cut -d= -f2)" +%s) - $(date +%s)) / 86400 - 1 ))
+[ "$days" -le 3650 ] || days=3650
+if [ "$renew" = 1 ]; then
+    [ -f ~/pivpn/pki/issued/"$site".crt ] || { echo "$site has no certificate to renew" >&2; exit 1; }
+    docker exec --user "$(id -u)" -e EASYRSA_PKI=/etc/pivpn/pki -e EASYRSA_BATCH=1 -e EASYRSA_CERT_EXPIRE="$days" \
+        pivpn-server /usr/share/easy-rsa/easyrsa renew "$site" >&2
+fi
+docker exec --user "$(id -u)" -e EASYRSA_CERT_EXPIRE="$days" pivpn-server pivpn-add "$site" "$ip" "10.100.${ip##*.}.0" >&2
 echo "$ip"
 EOF
 ) || die "pivpn-add on prod failed"
@@ -91,6 +109,13 @@ echo "$SITE: connected to the Pi-VPN server after ~$(((i + 1) * 5)) s"
 # the status log is refreshed every 60 s: ping to be sure it's this connection
 ssh "${SSHOPT[@]}" "$PROD" "ping -c 3 -W 2 $IP >/dev/null" && echo "$IP answers from prod" ||
     echo "warning: $IP doesn't answer ping from prod yet (the status log lags up to 60 s)"
+
+# --- renewed: the old certificate goes once the Pi is on the new one -----------------
+if [ "$RENEW" = 1 ]; then
+    ssh "${SSHOPT[@]}" "$PROD" "docker exec --user \$(id -u) -e EASYRSA_PKI=/etc/pivpn/pki -e EASYRSA_BATCH=1 pivpn-server sh -c '/usr/share/easy-rsa/easyrsa revoke-renewed $SITE && /usr/share/easy-rsa/easyrsa gen-crl'" >/dev/null &&
+        echo "$SITE: old certificate revoked (CRL updated)" ||
+        echo "warning: revoking the old $SITE certificate failed - easyrsa revoke-renewed $SITE + gen-crl by hand"
+fi
 
 # --- what the agent sees, through the tunnel (as hapi-collect will) ------------------
 echo "hapi-agent on $DEV, over the VPN:"
