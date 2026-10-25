@@ -102,9 +102,10 @@ ssh "${SSHOPT[@]}" "$PROD" "ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictH
 
 # --- register --------------------------------------------------------------------
 if [ -f "$REGISTER" ]; then
-    awk -F'|' -v OFS='|' -v d="$DEV" -v s=" $SITE " -v ip=" $IP " -v st=" Assigned to $SITE $(date +%F); $(date +%F) built " '
-        $2 ~ "^ *" d " *$" { $4 = s; $5 = ip; sub(/ *Built [0-9-]+, */, "", $9); sub(/; not assigned to a site yet/, "", $9)
-                             $9 = st $9 " " }
+    awk -F'|' -v OFS='|' -v d="$DEV" -v s=" $SITE " -v ip=" $IP " -v st="Assigned to $SITE $(date +%F)" '
+        $2 ~ "^ *" d " *$" { $4 = s; $5 = ip
+                             sub(/^ *Assigned to [^;]*; */, "", $9); sub(/; not assigned to a site yet/, "", $9); sub(/ +$/, "", $9)
+                             $9 = " " st "; " $9 " " }
         { print }' "$REGISTER" >"$REGISTER.tmp" && cat "$REGISTER.tmp" >"$REGISTER" && rm -f "$REGISTER.tmp"
     chmod 600 "$REGISTER"
     scp -q "${SSHOPT[@]}" "$REGISTER" "$PROD:pivpn/hapi-devices.md" &&

@@ -141,9 +141,21 @@ else
     printf '%s\n%s\n' "$keys" "$prodkey" >"$payload/authorized_keys"
     tar -C "$payload" -cf - . | ssh "${SSHOPT[@]}" "$LOGIN@$PI" 'rm -rf /tmp/hapi-build && mkdir -m 700 /tmp/hapi-build && tar -C /tmp/hapi-build -xf -'
 
-    # a fresh image: passwordless sudo; a re-run: pivpn's password from the register
+    # sudo on the Pi: passwordless (older Imager images), else pivpn's password
+    # from the register (a re-run) or the Imager user's password (a fresh image:
+    # SSHPASS, or asked for)
     sudopw=""
-    ssh "${SSHOPT[@]}" "$LOGIN@$PI" 'sudo -n true' 2>/dev/null || sudopw=$(reg_field "$DEV" 6)
+    if ! ssh "${SSHOPT[@]}" "$LOGIN@$PI" 'sudo -n true' 2>/dev/null; then
+        if [ "$LOGIN" = pivpn ] && [ -n "$(reg_field "$DEV" 6)" ]; then
+            sudopw=$(reg_field "$DEV" 6)
+        elif [ -n "${SSHPASS:-}" ]; then
+            sudopw=$SSHPASS
+        elif [ -t 0 ]; then
+            read -rsp "sudo password for $LOGIN@$PI: " sudopw; echo
+        else
+            die "sudo on the Pi needs $LOGIN's password: run from a terminal or set SSHPASS"
+        fi
+    fi
     printf '%s\n%s\n' "$PW" "$CODE" |
         as_root "$LOGIN" "$sudopw" 'bash /tmp/hapi-build/hapi-install.sh; rc=$?; rm -rf /tmp/hapi-build; exit $rc'
 
@@ -161,10 +173,16 @@ else
         fi" </dev/null
 fi
 
-# --- checks, as pivpn in a fresh session ------------------------------------------
+# --- checks ----------------------------------------------------------------------
+# sudoers: only hapi may grant anything without a password. The Raspberry Pi
+# OS files (010_global-tty, 010_proxy, ...) only set Defaults; Imager's
+# 010_pi-nopasswd must be gone. The files are root-only, so as root
+nopw=$(as_root pivpn "$PW" 'ls /etc/sudoers.d/010_pi-nopasswd 2>/dev/null
+    grep -l NOPASSWD /etc/sudoers.d/* | grep -vx /etc/sudoers.d/hapi; true' </dev/null)
+[ -z "$nopw" ] || echo "PROBLEM: passwordless sudo from $(echo $nopw)"
+# the rest as pivpn in a fresh session
 ssh "${SSHOPT[@]}" "pivpn@$PI" '
     bad=0
-    [ "$(ls /etc/sudoers.d | grep -v -e "^README$" -e "^hapi$")" = "" ] || { echo "PROBLEM: extra files in /etc/sudoers.d: $(ls /etc/sudoers.d)"; bad=1; }
     sudo -k; sudo -n true 2>/dev/null && { echo "PROBLEM: sudo works without the password"; bad=1; }
     sudo -n /usr/local/sbin/hapi-agent status >/dev/null || { echo "PROBLEM: passwordless hapi-agent not allowed"; bad=1; }
     for u in hapi-agent.timer hapi-setup ssh; do
@@ -175,7 +193,7 @@ ssh "${SSHOPT[@]}" "pivpn@$PI" '
     [ "$sshd_pw" = "PasswordAuthentication no" ] || { echo "PROBLEM: ssh password login not off"; bad=1; }
     vpn=$(systemctl is-active openvpn-client@pivpn 2>/dev/null || true)
     echo "checks: $([ $bad = 0 ] && echo ok || echo FAILED); VPN profile: $([ "$vpn" = active ] && echo running || echo "not yet (hapi-assign.sh)")"
-    exit $bad'
+    exit $bad' && [ -z "$nopw" ]
 
 echo
 echo "label:  $DEV    setup code: $CODE"
