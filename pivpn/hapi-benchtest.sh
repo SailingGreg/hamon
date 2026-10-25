@@ -26,7 +26,6 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HAMON="$(dirname "$HERE")"
-REGISTER="${REGISTER:-$HAMON/docs/hapi-devices.md}"
 PROD="${PROD:-greg@home.monitor-software.com}"
 # one shared connection per host for the whole run (ControlMaster): these
 # scripts make many short ssh calls, and a burst of new connections can be dropped
@@ -37,7 +36,7 @@ SSHOPT=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-ne
 PI=$1
 # a tunnel address (10.86.0.N): through prod as the ssh jump host
 PIOPT=("${SSHOPT[@]}")
-[[ $PI == 10.86.* ]] && PIOPT+=(-J "$PROD")
+[[ $PI == 10.86.* ]] && [ ! -d "$HOME/pivpn/pki" ] && PIOPT+=(-J "$PROD")   # from the dev Pi: through prod
 die() { echo "hapi-benchtest: $*" >&2; exit 1; }
 . "$HERE/hapi-register.sh"
 
@@ -64,7 +63,7 @@ echo "   forward -> $fwd"
 grep -q "hapi bench gateway" <<<"$fwd" || die "the agent didn't choose the fake gateway (another gateway on the LAN? hapi-agent discover)"
 
 echo "3. KNX tunnel from prod to $IP:3671, as hamon connects:"
-if ssh "${SSHOPT[@]}" "$PROD" "python3 hamon/pivpn/pi/hapi-agent.py test $IP" | sed 's/^/   /'; then
+if onprod "python3 hamon/pivpn/pi/hapi-agent.py test $IP" | sed 's/^/   /'; then
     result=PASS
 else
     result=FAIL

@@ -2,7 +2,12 @@
 #
 # hapi-image.sh  -  build the HAMON site box image, on devserver (arm64).
 #
-#   ./hapi-image.sh [<raspios-lite-arm64.img.xz>]
+#   ./hapi-image.sh [--publish] [<raspios-lite-arm64.img.xz>]
+#
+#   --publish-only   upload the newest image already built, without building
+#   --publish   also upload it to prod's download area (/hapi-image/, one login
+#               per integrator: pivpn/prod/hapi-image-user.sh), keeping the
+#               newest two there
 #
 # Takes the official Raspberry Pi OS Lite 64-bit image (the latest from
 # downloads.raspberrypi.com, checked against its SHA-256 and cached, unless a
@@ -40,6 +45,9 @@ STAMP=$(date +%Y%m%d)
 NAME="hamon-hapi-$STAMP"
 
 die() { echo "hapi-image: $*" >&2; exit 1; }
+PUBLISH=0 PUBLISH_ONLY=0
+if [ "${1:-}" = --publish ]; then PUBLISH=1; shift; fi
+if [ "${1:-}" = --publish-only ]; then PUBLISH_ONLY=1; shift; fi
 step() { echo "== $*"; }
 [ "$(uname -m)" = aarch64 ] || die "build on an arm64 machine (devserver): the chroot runs the image's own binaries"
 PATH=$PATH:/usr/sbin:/sbin
@@ -48,6 +56,27 @@ for t in xz parted e2fsck resize2fs zerofree curl losetup; do
 done
 sudo -n true 2>/dev/null || die "needs sudo without a prompt (run sudo -v first)"
 mkdir -p "$WORK" "$CACHE" "$OUT"
+
+# upload under a hidden temporary name (autoindex doesn't list dot files),
+# check it against its checksum on prod, then rename it into the listing: nobody
+# can download a half-uploaded image. rsync resumes an interrupted upload.
+publish() {
+    local name=$1 dest=/var/www/hapi-image
+    step "publish to ${PROD#*@}$dest"
+    rsync -t --partial "$OUT/$name.img.xz" "$PROD:$dest/.$name.img.xz.part" || die "upload failed (run again: it resumes)"
+    scp -q "$OUT/$name.img.xz.sha256" "$PROD:$dest/.$name.img.xz.sha256" || die "upload failed"
+    ssh "$PROD" "cd $dest && sed 's/  $name.img.xz\$/  .$name.img.xz.part/' .$name.img.xz.sha256 | sha256sum -c --quiet" ||
+        die "the uploaded image doesn't match its checksum (run again)"
+    ssh "$PROD" "cd $dest && mv .$name.img.xz.sha256 $name.img.xz.sha256 && mv .$name.img.xz.part $name.img.xz &&
+        ls -1t hamon-hapi-*.img.xz | tail -n +3 | while read -r f; do rm -f \"\$f\" \"\$f.sha256\"; done; ls -l"
+    echo "   https://${PROD#*@}/hapi-image/$name.img.xz"
+}
+if [ "$PUBLISH_ONLY" = 1 ]; then
+    latest=$(ls -1t "$OUT"/hamon-hapi-*.img.xz 2>/dev/null | head -1)
+    [ -n "$latest" ] || die "nothing built in $OUT"
+    publish "$(basename "$latest" .img.xz)"
+    exit 0
+fi
 
 # --- 1. base image ---------------------------------------------------------------
 if [ "$#" -ge 1 ]; then
@@ -91,11 +120,12 @@ for m in dev dev/pts proc sys; do sudo mount --bind "/$m" "$MNT/$m"; done
 
 # --- 3. our install, in image mode ----------------------------------------------------
 step "install (chroot, image mode)"
-keys=$(cat ~/.ssh/id_ed25519.pub) || die "no ~/.ssh/id_ed25519.pub"
-prodkey=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$PROD" cat .ssh/id_ed25519.pub) || die "can't read prod's key from $PROD"
+# the keys every box gets: prod's list (the dev Pi's and prod's)
+keys=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$PROD" cat pivpn/hapi-authorized_keys | grep '^ssh-') ||
+    die "no keys in $PROD:pivpn/hapi-authorized_keys"
 sudo mkdir -p "$MNT/tmp/hapi-build"
 sudo cp "$HERE"/pi/hapi-* "$HERE"/pi/hapi.sudoers "$MNT/tmp/hapi-build/"
-printf '%s\n%s\n' "$keys" "$prodkey" | sudo tee "$MNT/tmp/hapi-build/authorized_keys" >/dev/null
+printf '%s\n' "$keys" | sudo tee "$MNT/tmp/hapi-build/authorized_keys" >/dev/null
 # DNS for apt inside the chroot, and no daemons started by package scripts
 sudo cp -a "$MNT/etc/resolv.conf" "$WORK/resolv.conf.orig" 2>/dev/null || true
 sudo rm -f "$MNT/etc/resolv.conf"
@@ -139,7 +169,7 @@ check "a setup code is set" "[ ! -e $MNT/etc/hapi/setup-code ]"
 check "a VPN profile is present" "[ -z \"\$(ls $MNT/etc/openvpn/client/ 2>/dev/null)\" ]"
 check "pivpn has a password" "sudo grep -q '^pivpn:!' $MNT/etc/shadow"
 check "hapi-adopt missing" "sudo test -f $MNT/etc/sudoers.d/hapi-adopt"
-check "pivpn's keys missing" "[ \"\$(sudo grep -c ssh- $MNT/home/pivpn/.ssh/authorized_keys)\" = 2 ]"
+check "pivpn's keys missing" "[ \"\$(sudo grep -c ssh- $MNT/home/pivpn/.ssh/authorized_keys)\" -ge 2 ]"
 check "ssh password login not off" "sudo grep -q '^PasswordAuthentication no' $MNT/etc/ssh/sshd_config.d/01-hapi.conf"
 check "cloud-init not disabled" "[ -e $MNT/etc/cloud/cloud-init.disabled ]"
 check "user wizard still enabled" "[ ! -L $MNT/etc/systemd/system/multi-user.target.wants/userconfig.service ]"
@@ -179,6 +209,7 @@ cat >"$OUT/os_list.json" <<EOF
   ]
 }
 EOF
+[ "$PUBLISH" = 1 ] && publish "$NAME"
 echo
 echo "image: $OUT/$NAME.img.xz ($(( size / 1048576 )) MB; $(cut -c1-16 "$OUT/$NAME.img.xz.sha256")...)"
 echo "next:  write it with Raspberry Pi Imager (Use custom), boot a bench Pi, ./hapi-build.sh <ip>"

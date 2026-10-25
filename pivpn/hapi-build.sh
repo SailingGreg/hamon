@@ -38,7 +38,6 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HAMON="$(dirname "$HERE")"
-REGISTER="${REGISTER:-$HAMON/docs/hapi-devices.md}"
 PROD="${PROD:-greg@home.monitor-software.com}"
 # one shared connection per host for the whole run (ControlMaster): these
 # scripts make many short ssh calls, and a burst of new connections can be dropped
@@ -59,7 +58,7 @@ done
 PI=$1
 # a tunnel address (10.86.0.N): through prod as the ssh jump host
 PIOPT=("${SSHOPT[@]}")
-[[ $PI == 10.86.* ]] && PIOPT+=(-J "$PROD")
+[[ $PI == 10.86.* ]] && [ ! -d "$HOME/pivpn/pki" ] && PIOPT+=(-J "$PROD")   # from the dev Pi: through prod
 die() { echo "hapi-build: $*" >&2; exit 1; }
 
 # three random lower-case words, like the existing ones
@@ -129,12 +128,11 @@ else
         PW=$(words) CODE=$(words)
         echo "new password and setup code"
     fi
-    keys=$(cat ~/.ssh/id_ed25519.pub) || die "no ~/.ssh/id_ed25519.pub here"
-    prodkey=$(ssh "${SSHOPT[@]}" "$PROD" cat .ssh/id_ed25519.pub) || die "can't read prod's key from $PROD"
+    keys=$(authorized_keys)
     payload=$(mktemp -d)
     trap 'rm -rf "$payload"' EXIT
     cp "$HERE"/pi/hapi-* "$HERE"/pi/hapi.sudoers "$payload/"
-    printf '%s\n%s\n' "$keys" "$prodkey" >"$payload/authorized_keys"
+    printf '%s\n' "$keys" >"$payload/authorized_keys"
     tar -C "$payload" -cf - . | ssh "${PIOPT[@]}" "$LOGIN@$PI" 'rm -rf /tmp/hapi-build && mkdir -m 700 /tmp/hapi-build && tar -C /tmp/hapi-build -xf -'
 
     # sudo on the Pi: passwordless (older Imager images), else pivpn's password

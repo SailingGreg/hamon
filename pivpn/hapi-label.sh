@@ -18,7 +18,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HAMON="$(dirname "$HERE")"
 REGISTER="${REGISTER:-$HAMON/docs/hapi-devices.md}"
-OUTDIR="${OUTDIR:-$HAMON/docs/labels}"
+OUTDIR="${OUTDIR:-}"
 LABEL_MM="${LABEL_MM:-62x29}"
 DPI=300
 
@@ -27,7 +27,7 @@ DEV=$1
 die() { echo "hapi-label: $*" >&2; exit 1; }
 . "$HERE/hapi-register.sh"
 command -v qrencode >/dev/null || die "needs qrencode (apt install qrencode)"
-command -v convert >/dev/null || die "needs ImageMagick (apt install imagemagick)"
+[ -n "$OUTDIR" ] || { [ "$ON_PROD" = 1 ] && OUTDIR=~/pivpn/labels || OUTDIR="$HAMON/docs/labels"; }
 
 CODE=$(reg_field "$DEV" 7)
 [ -n "$CODE" ] || die "$DEV has no setup code in $REGISTER"
@@ -44,8 +44,28 @@ mkdir -p "$OUTDIR"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 qrencode -l M -m 2 -s 10 -o "$tmp/qr.png" "$URL"
-out="$OUTDIR/$DEV.png"
+# SVG everywhere (print it from a browser at 100 %, or with any label software)
+svg="$OUTDIR/$DEV.svg"
 tx=$((Q + 45)) tw=$((W - Q - 60))
+qr64=$(base64 -w0 "$tmp/qr.png")
+{
+  printf '<svg xmlns="http://www.w3.org/2000/svg" width="%smm" height="%smm" viewBox="0 0 %s %s">\n' "$w_mm" "$h_mm" "$W" "$H"
+  printf '<rect width="100%%" height="100%%" fill="#fff"/>\n'
+  printf '<image x="10" y="10" width="%s" height="%s" style="image-rendering:pixelated" href="data:image/png;base64,%s"/>\n' "$Q" "$Q" "$qr64"
+  printf '<g font-family="DejaVu Sans, Arial, sans-serif" fill="#000">\n'
+  printf '<text x="%s" y="%s" font-size="%s" font-weight="bold">%s</text>\n' "$tx" $((H * 26 / 100)) $((H * 17 / 100)) "$DEV"
+  printf '<text x="%s" y="%s" font-size="%s" font-family="DejaVu Sans Mono, monospace">%s</text>\n' "$tx" $((H * 48 / 100)) $((H * 10 / 100)) "$DEV.local"
+  printf '<text x="%s" y="%s" font-size="%s" font-family="DejaVu Sans Mono, monospace">setup code</text>\n' "$tx" $((H * 67 / 100)) $((H * 9 / 100))
+  printf '<text x="%s" y="%s" font-size="%s" font-weight="bold">%s</text>\n' "$tx" $((H * 88 / 100)) $((H * 12 / 100)) "$CODE"
+  printf '</g></svg>\n'
+} >"$svg"
+chmod 600 "$svg"
+if ! command -v convert >/dev/null; then
+    echo "label: $svg (${LABEL_MM} mm, $URL, setup code)"
+    exit 0
+fi
+
+out="$OUTDIR/$DEV.png"
 convert -size "${W}x${H}" xc:white -units PixelsPerInch -density $DPI \
     \( "$tmp/qr.png" -filter point -resize "${Q}x${Q}" \) -geometry +10+10 -composite \
     -fill black -font "${font:-DejaVu-Sans-Bold}" \
@@ -57,4 +77,4 @@ convert -size "${W}x${H}" xc:white -units PixelsPerInch -density $DPI \
     \( -background white -size "${tw}x$((H * 20 / 100))" -gravity west label:"$CODE" \) -gravity northwest -geometry +$tx+$((H * 72 / 100)) -composite \
     "$out"
 chmod 600 "$out"
-echo "label: $out (${LABEL_MM} mm, $URL, setup code)"
+echo "label: $out and $svg (${LABEL_MM} mm, $URL, setup code)"
