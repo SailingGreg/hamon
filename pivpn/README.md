@@ -161,11 +161,13 @@ one of the gateway's tunnel slots).
 
 ```bash
 docker exec --user "$(id -u)" -e EASYRSA_PKI=/etc/pivpn/pki -e EASYRSA_BATCH=1 \
-  pivpn-server sh -c '/usr/share/easy-rsa/easyrsa revoke <name> && /usr/share/easy-rsa/easyrsa gen-crl'
+  -e EASYRSA_CRL_DAYS=3600 pivpn-server sh -c '/usr/share/easy-rsa/easyrsa revoke <name> && /usr/share/easy-rsa/easyrsa gen-crl'
 rm ~/pivpn/ccd/<name> ~/pivpn/clients/<name>.*
 ```
 
-The CRL is re-read on every connection. Deleting the ccd file also blocks the client
+Always give `gen-crl` an `EASYRSA_CRL_DAYS` that reaches the CA's expiry (2036-10-05; check
+with `openssl crl -in ~/pivpn/pki/crl.pem -noout -nextupdate`): easy-rsa's default is 180 days,
+and once the CRL's next-update date passes the server refuses every client. The CRL is re-read on every connection. Deleting the ccd file also blocks the client
 (`ccd-exclusive`).
 
 ## Certificate lifetimes

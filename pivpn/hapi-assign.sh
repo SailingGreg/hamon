@@ -112,7 +112,10 @@ ssh "${SSHOPT[@]}" "$PROD" "ping -c 3 -W 2 $IP >/dev/null" && echo "$IP answers 
 
 # --- renewed: the old certificate goes once the Pi is on the new one -----------------
 if [ "$RENEW" = 1 ]; then
-    ssh "${SSHOPT[@]}" "$PROD" "docker exec --user \$(id -u) -e EASYRSA_PKI=/etc/pivpn/pki -e EASYRSA_BATCH=1 pivpn-server sh -c '/usr/share/easy-rsa/easyrsa revoke-renewed $SITE && /usr/share/easy-rsa/easyrsa gen-crl'" >/dev/null &&
+    # the CRL runs to the CA's expiry like everything else: easy-rsa's default
+    # is 180 days, and an expired CRL makes the server refuse every client
+    ssh "${SSHOPT[@]}" "$PROD" 'days=$(( ($(date -u -d "$(openssl x509 -noout -enddate -in ~/pivpn/pki/ca.crt | cut -d= -f2)" +%s) - $(date +%s)) / 86400 - 1 ))
+        docker exec --user $(id -u) -e EASYRSA_PKI=/etc/pivpn/pki -e EASYRSA_BATCH=1 -e EASYRSA_CRL_DAYS=$days pivpn-server sh -c "/usr/share/easy-rsa/easyrsa revoke-renewed '"$SITE"' && /usr/share/easy-rsa/easyrsa gen-crl"' >/dev/null &&
         echo "$SITE: old certificate revoked (CRL updated)" ||
         echo "warning: revoking the old $SITE certificate failed - easyrsa revoke-renewed $SITE + gen-crl by hand"
 fi
