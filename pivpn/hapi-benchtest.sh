@@ -35,10 +35,13 @@ SSHOPT=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-ne
 
 [ "$#" -eq 1 ] || { echo "usage: $0 <pi-address>" >&2; exit 2; }
 PI=$1
+# a tunnel address (10.86.0.N): through prod as the ssh jump host
+PIOPT=("${SSHOPT[@]}")
+[[ $PI == 10.86.* ]] && PIOPT+=(-J "$PROD")
 die() { echo "hapi-benchtest: $*" >&2; exit 1; }
 . "$HERE/hapi-register.sh"
 
-MAC=$(ssh "${SSHOPT[@]}" "pivpn@$PI" cat /sys/class/net/eth0/address) || die "can't log in as pivpn@$PI"
+MAC=$(ssh "${PIOPT[@]}" "pivpn@$PI" cat /sys/class/net/eth0/address) || die "can't log in as pivpn@$PI"
 DEV="hapi-$(tr -d : <<<"$MAC" | tail -c 7)"
 IP=$(reg_field "$DEV" 4)
 [ -n "$IP" ] || die "$DEV has no tunnel address in the register - hapi-assign.sh first"
@@ -54,8 +57,8 @@ kill -0 "$fake" 2>/dev/null || { cat "$log" >&2; die "the fake gateway didn't st
 echo "1. fake gateway running here"
 
 echo "2. hapi-agent on the Pi:"
-ssh "${SSHOPT[@]}" "pivpn@$PI" 'sudo -n /usr/local/sbin/hapi-agent run' | sed 's/^/   /' || true
-fwd=$(ssh "${SSHOPT[@]}" "pivpn@$PI" '/usr/local/sbin/hapi-agent status' |
+ssh "${PIOPT[@]}" "pivpn@$PI" 'sudo -n /usr/local/sbin/hapi-agent run' | sed 's/^/   /' || true
+fwd=$(ssh "${PIOPT[@]}" "pivpn@$PI" '/usr/local/sbin/hapi-agent status' |
       python3 -c 'import json,sys; s=json.load(sys.stdin); g=s.get("gateway") or {}; print(g.get("ip",""), g.get("name",""))')
 echo "   forward -> $fwd"
 grep -q "hapi bench gateway" <<<"$fwd" || die "the agent didn't choose the fake gateway (another gateway on the LAN? hapi-agent discover)"

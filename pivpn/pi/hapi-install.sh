@@ -25,7 +25,7 @@ cd "$(dirname "$0")"
 IFS= read -r PW || true
 IFS= read -r CODE || true
 [ -n "${PW:-}" ] && [ -n "${CODE:-}" ] || { echo "hapi-install: the password and setup code go on stdin" >&2; exit 1; }
-for f in hapi-hostname.sh hapi-hostname.service hapi-agent.py hapi-agent.service hapi-agent.timer \
+for f in hapi-hostname.sh hapi-hostname.service hapi-vpn-swap.sh hapi-agent.py hapi-agent.service hapi-agent.timer \
          hapi-agent.conf.example hapi-setup.py hapi-setup.service hapi.sudoers authorized_keys; do
     [ -f "$f" ] || { echo "hapi-install: $f missing" >&2; exit 1; }
 done
@@ -37,7 +37,9 @@ export DEBIAN_FRONTEND=noninteractive
 echo "iptables-persistent iptables-persistent/autosave_v4 boolean false" | debconf-set-selections
 echo "iptables-persistent iptables-persistent/autosave_v6 boolean false" | debconf-set-selections
 apt-get -qq update
-apt-get -qq -y install openvpn iptables-persistent conntrack fake-hwclock unattended-upgrades \
+# --no-upgrade: on a deployed Pi (re-run over the VPN) an openvpn upgrade
+# would restart the tunnel under us; unattended-upgrades does upgrades
+apt-get -qq -y --no-upgrade install openvpn iptables-persistent conntrack fake-hwclock unattended-upgrades \
     avahi-daemon python3 >/dev/null
 
 step "hostname (hapi-<eth0 MAC>)"
@@ -112,6 +114,18 @@ step "cloud-init off (Imager's first-boot seed has done its job)"
 if [ -d /etc/cloud ]; then
     touch /etc/cloud/cloud-init.disabled
 fi
+# and its seed holds the bench Wi-Fi password and the Imager user's password
+# hash: wired DHCP only, nothing else (the Wi-Fi profile NetworkManager made
+# from it stays until --ship removes it)
+if [ -f /boot/firmware/network-config ]; then
+    printf '%s\n' "network:" "  version: 2" "  ethernets:" "    eth0:" "      dhcp4: true" "      optional: true" >/boot/firmware/network-config
+fi
+if [ -f /boot/firmware/user-data ]; then
+    printf '%s\n' "#cloud-config" "# cleared by hapi-install.sh; cloud-init is disabled on this box" >/boot/firmware/user-data
+fi
+
+step "VPN profile switcher (hapi-vpn-swap: falls back to the previous profile)"
+install -m 755 hapi-vpn-swap.sh /usr/local/sbin/hapi-vpn-swap
 
 step "IP forwarding"
 echo net.ipv4.ip_forward=1 >/etc/sysctl.d/90-pivpn.conf

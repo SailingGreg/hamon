@@ -58,6 +58,23 @@ OS Lite 64-bit (Bookworm or Trixie; a Pi 3B+ or later) and a network.
    with a QR code of it, setup code; local only, mode 600), written by every build and ship,
    or `./hapi-label.sh <device>` (`LABEL_MM=WxH` for another size).
 
+**A Pi on site (remote mode).** Give the scripts the Pi's tunnel address instead of a LAN
+address and they reach it through prod as the ssh jump host (`ssh -J`), e.g. for the bench
+unit:
+
+```bash
+./hapi-build.sh 10.86.0.201                  # re-run the build: updates, fixes, new checks
+./hapi-assign.sh -r 10.86.0.201 bench-test   # renew its certificate
+```
+
+A re-run of the build doesn't upgrade installed packages (an openvpn upgrade would restart the
+tunnel under us; unattended-upgrades does that) and keeps the gateway choice; don't use
+`--ship` on a Pi on site, it clears that choice. A new profile (`hapi-assign`) is applied by
+`hapi-vpn-swap` on the Pi, detached, so the ssh session dropping with the tunnel doesn't
+matter: if the Pi isn't up on the new profile within 2 minutes it goes back to the previous one
+and reports `restored` (in `/run/hapi/vpn-swap`, and `journalctl -t hapi-vpn-swap`), and
+`hapi-assign -r` revokes the old certificate only after the Pi itself says `up`.
+
 **Device register** (`docs/hapi-devices.md`: local only, mode 600, copied to prod's
 `~/pivpn/hapi-devices.md` by the scripts; it holds secrets). The device table has one row per
 Pi with its current state, password and setup code; the **Builds** table gets a row from every
