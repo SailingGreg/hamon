@@ -4,6 +4,7 @@
 #
 #   ./hapi-image.sh [--publish] [<raspios-lite-arm64.img.xz>]
 #
+#   --publish-only   upload the newest image already built, without building
 #   --publish   also upload it to prod's download area (/hapi-image/, one login
 #               per integrator: pivpn/prod/hapi-image-user.sh), keeping the
 #               newest two there
@@ -44,8 +45,9 @@ STAMP=$(date +%Y%m%d)
 NAME="hamon-hapi-$STAMP"
 
 die() { echo "hapi-image: $*" >&2; exit 1; }
-PUBLISH=0
+PUBLISH=0 PUBLISH_ONLY=0
 if [ "${1:-}" = --publish ]; then PUBLISH=1; shift; fi
+if [ "${1:-}" = --publish-only ]; then PUBLISH_ONLY=1; shift; fi
 step() { echo "== $*"; }
 [ "$(uname -m)" = aarch64 ] || die "build on an arm64 machine (devserver): the chroot runs the image's own binaries"
 PATH=$PATH:/usr/sbin:/sbin
@@ -54,6 +56,27 @@ for t in xz parted e2fsck resize2fs zerofree curl losetup; do
 done
 sudo -n true 2>/dev/null || die "needs sudo without a prompt (run sudo -v first)"
 mkdir -p "$WORK" "$CACHE" "$OUT"
+
+# upload under a hidden temporary name (autoindex doesn't list dot files),
+# check it against its checksum on prod, then rename it into the listing: nobody
+# can download a half-uploaded image. rsync resumes an interrupted upload.
+publish() {
+    local name=$1 dest=/var/www/hapi-image
+    step "publish to ${PROD#*@}$dest"
+    rsync -t --partial "$OUT/$name.img.xz" "$PROD:$dest/.$name.img.xz.part" || die "upload failed (run again: it resumes)"
+    scp -q "$OUT/$name.img.xz.sha256" "$PROD:$dest/.$name.img.xz.sha256" || die "upload failed"
+    ssh "$PROD" "cd $dest && sed 's/  $name.img.xz\$/  .$name.img.xz.part/' .$name.img.xz.sha256 | sha256sum -c --quiet" ||
+        die "the uploaded image doesn't match its checksum (run again)"
+    ssh "$PROD" "cd $dest && mv .$name.img.xz.sha256 $name.img.xz.sha256 && mv .$name.img.xz.part $name.img.xz &&
+        ls -1t hamon-hapi-*.img.xz | tail -n +3 | while read -r f; do rm -f \"\$f\" \"\$f.sha256\"; done; ls -l"
+    echo "   https://${PROD#*@}/hapi-image/$name.img.xz"
+}
+if [ "$PUBLISH_ONLY" = 1 ]; then
+    latest=$(ls -1t "$OUT"/hamon-hapi-*.img.xz 2>/dev/null | head -1)
+    [ -n "$latest" ] || die "nothing built in $OUT"
+    publish "$(basename "$latest" .img.xz)"
+    exit 0
+fi
 
 # --- 1. base image ---------------------------------------------------------------
 if [ "$#" -ge 1 ]; then
@@ -185,12 +208,7 @@ cat >"$OUT/os_list.json" <<EOF
   ]
 }
 EOF
-if [ "$PUBLISH" = 1 ]; then
-    step "publish to $PROD:/var/www/hapi-image"
-    scp -q "$OUT/$NAME.img.xz" "$OUT/$NAME.img.xz.sha256" "$PROD:/var/www/hapi-image/" || die "upload failed"
-    ssh "$PROD" 'cd /var/www/hapi-image && ls -1t hamon-hapi-*.img.xz | tail -n +3 | while read -r f; do rm -f "$f" "$f.sha256"; done; ls -l'
-    echo "   https://${PROD#*@}/hapi-image/$NAME.img.xz"
-fi
+[ "$PUBLISH" = 1 ] && publish "$NAME"
 echo
 echo "image: $OUT/$NAME.img.xz ($(( size / 1048576 )) MB; $(cut -c1-16 "$OUT/$NAME.img.xz.sha256")...)"
 echo "next:  write it with Raspberry Pi Imager (Use custom), boot a bench Pi, ./hapi-build.sh <ip>"
