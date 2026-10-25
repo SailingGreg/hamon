@@ -19,7 +19,9 @@
 # (docs/hapi-devices.md: local only, 600). A re-run keeps them; -n makes new
 # ones. Re-runs log in as pivpn and use its password for sudo.
 #
-#   -u <user>   the user Imager created (default pivpn)
+#   -u <user>   the user Imager created (default pivpn); flashed with a
+#               password instead of a key, the first run installs this
+#               machine's key with ssh-copy-id (prompts, or SSHPASS=<password>)
 #   -n          new password and setup code
 #   --ship      instead of building: clear the bench state before it goes to
 #               site (gateway choice, forward, Wi-Fi profiles) and re-check
@@ -91,6 +93,16 @@ as_root() {   # as_root <user> <password-or-empty> <command> ; rest of stdin fol
 }
 
 # --- who is it ----------------------------------------------------------------
+# an image flashed with a password rather than a key: install this machine's
+# key first (asks for the Imager password; or SSHPASS=<it> in the environment)
+if ! ssh "${SSHOPT[@]}" "$LOGIN@$PI" true 2>/dev/null; then
+    echo "$LOGIN@$PI: no key login yet - installing this machine's key"
+    if [ -n "${SSHPASS:-}" ]; then
+        sshpass -e ssh-copy-id -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_ed25519.pub "$LOGIN@$PI" >/dev/null 2>&1
+    elif [ -t 0 ]; then
+        ssh-copy-id -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_ed25519.pub "$LOGIN@$PI"
+    fi
+fi
 MAC=$(ssh "${SSHOPT[@]}" "$LOGIN@$PI" cat /sys/class/net/eth0/address) ||
     die "can't log in as $LOGIN@$PI with this machine's key (-u for the user Imager created)"
 DEV="hapi-$(tr -d : <<<"$MAC" | tail -c 7)"
@@ -106,7 +118,11 @@ if [ "$SHIP" = 1 ]; then
         sed -i -E "s/^(gateway_ip|gateway_serial|gateway_mac) *=.*/\1 =/" /etc/hapi/agent.conf
         for c in HAPI-DNAT HAPI-SNAT; do iptables -t nat -F $c 2>/dev/null || true; done
         netfilter-persistent save >/dev/null 2>&1 || true
-        if command -v nmcli >/dev/null; then
+        # Wi-Fi profiles go only once it is on Ethernet: otherwise this cuts it off
+        if [ "$(ip -4 route show default | awk "{print \$5; exit}")" != eth0 ]; then
+            echo "still on Wi-Fi (default route not via eth0): Wi-Fi profiles kept - connect Ethernet and run --ship again" >&2
+            exit 1
+        elif command -v nmcli >/dev/null; then
             nmcli -t -f NAME,TYPE connection show | awk -F: "\$2 ~ /wireless/ {print \$1}" |
                 while read -r c; do nmcli connection delete "$c" >/dev/null && echo "removed Wi-Fi profile $c"; done
         fi
