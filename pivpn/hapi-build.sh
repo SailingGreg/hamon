@@ -193,5 +193,6 @@ ssh "${PIOPT[@]}" "pivpn@$PI" '
 
 echo
 "$HERE/hapi-label.sh" "$DEV" || echo "(no label image: see hapi-label.sh)"
+"$HERE/hapi-sheet.sh" "$DEV" || echo "(no install sheet: see hapi-sheet.sh)"
 echo "label:  $DEV    setup code: $CODE"
 [ "$SHIP" = 1 ] && echo "ready to ship" || echo "next:   ./hapi-assign.sh $PI <site>"
