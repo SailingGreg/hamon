@@ -21,123 +21,79 @@ Pick a free N with `grep -h ifconfig-push ~/pivpn/ccd/*`.
 
 ## Add a site
 
-On the server:
+Everything runs from the dev Pi, in `pivpn/`. The Pi on the bench needs only Raspberry Pi
+OS Lite 64-bit (Bookworm or Trixie; a Pi 3B+ or later) and a network.
 
-```bash
-docker exec --user "$(id -u)" pivpn-server pivpn-add <name> 10.86.0.N 10.100.N.0
-```
+1. **Flash** with Raspberry Pi Imager: ssh on, any first user, a key (this machine's) or a
+   password. Wired or Wi-Fi on the bench.
+2. **Find it:** `./hapi-find.sh` lists the Pis on the LAN with IP, MAC and the expected
+   `hapi-<last 6 hex of the eth0 MAC>` name (on Wi-Fi the MAC shown is wlan0's, so the name
+   column is wrong until it's wired; `<imager-hostname>.local` also works).
+3. **Build:** `./hapi-build.sh -u <imager-user> <ip>` (password-flashed: it installs this
+   machine's key first, asking for the password, or `SSHPASS=<password>`). It copies `pi/`
+   and runs `pi/hapi-install.sh` as root: packages (openvpn, iptables-persistent, conntrack,
+   fake-hwclock, unattended-upgrades, avahi), the `hapi-<MAC>` hostname unit, the `pivpn`
+   user with this machine's and prod's ssh keys, key-only ssh, `hapi-agent` + timer, the
+   setup page with its `hapi` user and sudoers, IP forwarding. It makes the pivpn password
+   and the setup code (three random words each), records both in the device register
+   (`docs/hapi-devices.md`, local only), then removes Imager's passwordless sudo, locks the
+   Imager user and checks the lock-down. It ends with the label line: hostname + setup code.
+   Safe to re-run (it updates the Pi and keeps the secrets; `-n` makes new ones).
+4. **Assign:** `./hapi-assign.sh <ip> <site>` (the hamon.yml name). On prod it takes the
+   site's address (its existing one, or the lowest free `10.86.0.N` from .11; `-i N` to
+   choose, .200 and up for bench tests) and runs `pivpn-add`; the `.ovpn` goes straight from
+   prod to the Pi, starts the VPN, waits for the Pi on the server, runs `hapi-agent`
+   through the tunnel and copies the register to prod. It prints the hamon-upload values:
+   `dns 10.86.0.N`, port 3671.
+5. **Ship:** on Ethernet, `./hapi-build.sh --ship <ip>` clears the bench gateway choice and
+   forward, removes Wi-Fi profiles (it refuses while the Pi is still on Wi-Fi), scrubs
+   Imager's cloud-init seed on the boot partition (on Trixie it holds the bench Wi-Fi
+   password and the Imager user's password hash; the build already disabled cloud-init) and
+   re-checks the lock-down. Run it via the Pi's Ethernet address, not its Wi-Fi one. Print
+   the label.
 
-This issues a certificate and a per-client `tls-crypt-v2` key, writes `ccd/<name>`, and
-creates `~/pivpn/clients/<name>.ovpn`. Copy that file to the Pi over ssh/scp only
-(never email): it is the Pi's identity.
+**Device register** (`docs/hapi-devices.md`: local only, mode 600, copied to prod's
+`~/pivpn/hapi-devices.md` by the scripts; it holds secrets). The device table has one row per
+Pi with its current state, password and setup code; the **Builds** table gets a row from every
+`hapi-build`, `hapi-assign` and `--ship` run: date, device, step, hamon commit, model and OS,
+the Pi's ssh host key fingerprint (ED25519; compare with what ssh shows on first connection),
+the VPN client certificate (name, serial, expiry: renew before it, see below) and the setup
+code. Code: `hapi-register.sh`.
 
-On a freshly imaged Pi, first install the hostname unit from `pi/`, which names the box
-`hapi-<last 6 hex of the eth0 MAC>` at every boot (a no-op once set; reachable as `<name>.local`):
+The box name identifies the hardware; the VPN client name is the site (e.g. site X uses
+hapi-1a2b3c). In hamon-upload set the site's address to `10.86.0.N`, port `3671`, and keep
+the old address noted as the fallback.
 
-```bash
-install -m 755 hapi-hostname.sh /usr/local/sbin/
-install -m 644 hapi-hostname.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now hapi-hostname
-```
+**Lock-down:** only `/etc/sudoers.d/hapi` may grant anything without a password
+(`hapi-agent`, for the setup page and for us over the VPN). Raspberry Pi OS's own files there
+(`010_global-tty`, `010_proxy`, `010_at-export`, `010_dpkg-threads`) only set `Defaults`.
+`010_global-tty` makes sudo's 15-minute password cache global: after one `sudo` with the
+password, a new ssh session gets sudo without it until the cache expires (`sudo -k` ends it).
 
-The box name identifies the hardware; the VPN client name is the site (e.g. site X uses hapi-1a2b3c).
-
-To find a box on the bench (its IP, MAC and `hapi-` name, before or after the hostname unit is
-installed), run `./hapi-find.sh` on a machine on the same network, e.g. the dev Pi:
-
-```
-IP               MAC                EXPECTED NAME MDNS      SSH  SETUP PAGE
-192.168.1.40     b8:27:eb:1a:2b:3c  hapi-1a2b3c   yes       yes  http://hapi-1a2b3c.local/
-192.168.1.41     d8:3a:dd:4d:5e:6f  hapi-4d5e6f   not yet   yes  no
-```
-
-`not yet` under MDNS means the box doesn't answer to that name yet (a fresh image is still
-`raspberrypi`), or it's on Wi-Fi, where the MAC seen is wlan0's. It needs nmap, curl and
-libnss-mdns, works only on a directly attached network, and takes about 15 s for a /24.
-
-On the Pi (Raspberry Pi OS Lite 64-bit, Bookworm or Trixie, both OpenVPN 2.6), as root.
-`eth0` below is the Pi's LAN interface; use `wlan0` if it is on Wi-Fi (wired is preferred on site):
-
-```bash
-apt install -y openvpn iptables-persistent fake-hwclock
-systemctl enable fake-hwclock-load fake-hwclock-save   # no RTC: keeps the clock past cert start dates if NTP is blocked
-install -m 600 <name>.ovpn /etc/openvpn/client/pivpn.conf
-systemctl enable --now openvpn-client@pivpn          # reconnects by itself (keepalive)
-
-# forward the tunnel IP's KNX port to the site gateway (GW = its LAN IP)
-echo net.ipv4.ip_forward=1 > /etc/sysctl.d/90-pivpn.conf && sysctl --system
-iptables -t nat -A PREROUTING  -i tun0 -p udp --dport 3671 -j DNAT --to-destination GW:3671
-iptables -t nat -A POSTROUTING -o eth0 -p udp -d GW --dport 3671 -j MASQUERADE
-netfilter-persistent save
-```
-
-The gateway should have a DHCP reservation so `GW` doesn't change.
-
-**Or let `hapi-agent` do the forwarding** (in `pi/`, Python 3 stdlib only). It finds the
-gateway with a KNXnet/IP search, writes the two rules (own chains `HAPI-DNAT`/`HAPI-SNAT`,
-saved), and every 10 minutes follows the gateway if its IP changes:
-
-```bash
-apt install -y conntrack
-install -m 755 hapi-agent.py /usr/local/sbin/hapi-agent
-install -m 644 hapi-agent.service hapi-agent.timer /etc/systemd/system/
-install -d /etc/hapi && install -m 600 hapi-agent.conf.example /etc/hapi/agent.conf
-systemctl daemon-reload
-hapi-agent discover          # what answers on the LAN
-hapi-agent test              # KNX tunnel connect/state/disconnect (takes a slot briefly)
-systemctl enable --now hapi-agent.timer
-hapi-agent status            # last result: VPN, gateway, forward, errors
-```
-
-Every gateway it sees is listed in its status (`gateways`). With several tunnelling
-gateways it refuses to guess: the installer picks one on the setup page (below), or from
-the server `ssh pivpn@10.86.0.N sudo hapi-agent pin <serial>` (`unpin` = automatic again;
-the sudo rule allows only `hapi-agent`, with no password). If multicast is blocked, set `gateway_ip`. If the gateway vanishes
-it keeps the last forward and reports the problem. The timer run never takes a tunnel slot
-(it only sends a description request). `pi/hapi-agent.py test 10.86.0.N` run on the server tests
-the whole path the way hamon connects (NAT mode). `fake-gateway.py` stands in for a gateway
-on the bench.
+**Gateway choice** (`hapi-agent`, every 10 minutes): it finds the gateway with a KNXnet/IP
+search and writes the forward (own chains `HAPI-DNAT`/`HAPI-SNAT`, saved), following the
+gateway if its IP changes. With several tunnelling gateways it refuses to guess: the
+installer picks one on the setup page, or from the server
+`ssh pivpn@10.86.0.N sudo hapi-agent pin <serial>` (`unpin` = automatic again). If
+multicast is blocked, set `gateway_ip` in `/etc/hapi/agent.conf`. The timer run never takes
+a tunnel slot; `hapi-agent test` (on the Pi) or `pi/hapi-agent.py test 10.86.0.N` (on the
+server, the way hamon connects) does, briefly. `fake-gateway.py` stands in for a gateway on
+the bench.
 
 **Installer's setup page** (`hapi-setup.py`, port 80): from a laptop on the site network,
-`http://<hostname>.local/`, signed in as `admin` with the setup code printed on the
-box's label (as KNX Secure devices carry their key). It shows the link to hamon, the
-gateway in use and every gateway seen, and can choose a gateway, search again or run the
-connection test. It answers only clients on the Pi's own LAN subnets (never over the VPN),
-locks out for a minute after five wrong codes, and runs as the unprivileged `hapi` user,
-whose only root action is `sudo hapi-agent`. Sign-in is a form, not browser basic auth, so
-nothing is remembered by the browser: the session (an in-memory cookie) ends after 30 min
-idle, 4 hours at most, on **Sign out**, when the setup code changes, or when the page restarts.
-
-```bash
-useradd --system --no-create-home --shell /usr/sbin/nologin hapi
-install -m 755 hapi-setup.py /usr/local/sbin/hapi-setup
-install -m 644 hapi-setup.service /etc/systemd/system/
-visudo -cf hapi.sudoers && install -m 440 hapi.sudoers /etc/sudoers.d/hapi
-install -m 640 -o root -g hapi setup-code /etc/hapi/setup-code   # three random words; print it on the label
-chown root:hapi /etc/hapi/agent.conf && chmod 640 /etc/hapi/agent.conf
-systemctl daemon-reload && systemctl enable --now hapi-setup
-```
-
-**Check sudo is locked down** before the Pi leaves the bench. Raspberry Pi Imager can add
-`/etc/sudoers.d/010_pi-nopasswd`, which gives the first user passwordless sudo for
-everything; remove it if present. Then, in a fresh ssh session as `pivpn`:
-
-```bash
-ls /etc/sudoers.d/       # only README and hapi
-sudo -k; sudo -l         # must ask for the password (sudo caches it for 15 min per terminal),
-                         # then: NOPASSWD only for /usr/local/sbin/hapi-agent
-sudo -n true             # must fail: "a password is required"
-```
+`http://<hostname>.local/`, signed in as `admin` with the setup code from the label. It shows
+the link to hamon, the gateway in use and every gateway seen, and can choose a gateway,
+search again or run the connection test. It answers only clients on the Pi's own LAN
+subnets (never over the VPN), locks out for a minute after five wrong codes, and runs as the
+unprivileged `hapi` user. Sign-in is a form (an in-memory session: 30 min idle, 4 hours at
+most, ended by Sign out, a new setup code or a restart).
 
 Then check, and point hamon at the tunnel IP:
 
 ```bash
-docker logs --tail 20 pivpn-server | grep <name>   # "Peer Connection Initiated", cipher CHACHA20
-ping -c 3 10.86.0.N                                 # from the server
+docker exec pivpn-server cat /tmp/pivpn-status.log | grep '^<name>,'   # connected clients (v1 format)
+ping -c 3 10.86.0.N                                                     # from the server
 ```
-
-In hamon-upload set the site's address to `10.86.0.N`, port `3671`. Keep the old address
-noted as the fallback.
 
 ## Status
 
