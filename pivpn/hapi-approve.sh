@@ -31,7 +31,6 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HAMON="$(dirname "$HERE")"
-REGISTER="${REGISTER:-$HAMON/docs/hapi-devices.md}"
 PROD="${PROD:-greg@home.monitor-software.com}"
 SSHOPT=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new
         -o ControlMaster=auto -o "ControlPath=$HOME/.ssh/cm-hapi-%C" -o ControlPersist=60)
@@ -40,7 +39,7 @@ die() { echo "hapi-approve: $*" >&2; exit 1; }
 . "$HERE/hapi-register.sh"
 
 if [ "${1:-}" = --list ]; then
-    ssh "${SSHOPT[@]}" "$PROD" python3 - <<'PYEOF'
+    onprod python3 - <<'PYEOF'
 import glob, json, os, time
 base = os.path.expanduser("~/pivpn/enrol")
 pending = sorted(glob.glob(base + "/pending/*.json"))
@@ -61,7 +60,7 @@ PYEOF
 fi
 if [ "${1:-}" = --reject ]; then
     [ "$#" -eq 2 ] && [[ $2 =~ ^hapi-[0-9a-f]{6}$ ]] || die "usage: $0 --reject <hapi-xxxxxx>"
-    ssh "${SSHOPT[@]}" "$PROD" "rm -v ~/pivpn/enrol/pending/$2.json" || die "nothing pending for $2"
+    onprod "rm -v ~/pivpn/enrol/pending/$2.json" || die "nothing pending for $2"
     exit 0
 fi
 
@@ -71,7 +70,7 @@ if [ "${1:-}" = --forget ]; then
     if [ "${1:-}" = -y ]; then FYES=1; shift; fi
     [ "$#" -eq 1 ] && [[ $1 =~ ^hapi-[0-9a-f]{6}$ ]] || die "usage: $0 --forget [-y] <hapi-xxxxxx>"
     BOX=$1
-    done=$(ssh "${SSHOPT[@]}" "$PROD" "cat ~/pivpn/enrol/approved/$BOX.json" 2>/dev/null) || die "$BOX has no approval to forget"
+    done=$(onprod "cat ~/pivpn/enrol/approved/$BOX.json" 2>/dev/null) || die "$BOX has no approval to forget"
     read -r fsite fip < <(python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["site"], d["ip"])' <<<"$done")
     echo "$BOX: approved for $fsite ($fip). Forgetting it revokes that VPN certificate (the card now in"
     echo "the box loses its VPN), frees $fip and clears the approval, so a new card in this box can enrol."
@@ -81,7 +80,7 @@ if [ "${1:-}" = --forget ]; then
         read -rp "Forget $BOX ($fsite)? [y/N] " ok
         [[ $ok =~ ^[Yy] ]] || die "not forgotten"
     fi
-    ssh "${SSHOPT[@]}" "$PROD" bash -s -- "$BOX" "$fsite" "$fip" <<'PRODEOF'
+    onprod bash -s -- "$BOX" "$fsite" "$fip" <<'PRODEOF'
 set -eu
 box=$1 site=$2 ip=$3 P=~/pivpn
 days=$(( ($(date -u -d "$(openssl x509 -noout -enddate -in "$P/pki/ca.crt" | cut -d= -f2)" +%s) - $(date +%s)) / 86400 - 1 ))
@@ -117,7 +116,7 @@ BOX=$1 SITE=$2
 [ -z "$WANT" ] || [[ $WANT =~ ^[0-9]+$ && $WANT -ge 11 && $WANT -le 254 ]] || die "-i takes N from 11 to 254"
 
 # --- already approved (a retry after a failed adoption): straight to the adoption ---
-done=$(ssh "${SSHOPT[@]}" "$PROD" "cat ~/pivpn/enrol/approved/$BOX.json" 2>/dev/null || true)
+done=$(onprod "cat ~/pivpn/enrol/approved/$BOX.json" 2>/dev/null || true)
 if [ -n "$done" ]; then
     read -r dsite IP < <(python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["site"], d["ip"])' <<<"$done")
     [ "$dsite" = "$SITE" ] || die "$BOX was approved for $dsite, not $SITE"
@@ -127,7 +126,7 @@ fi
 
 # --- the request ------------------------------------------------------------------
 [ "${RETRY:-0}" = 1 ] || {
-req=$(ssh "${SSHOPT[@]}" "$PROD" "cat ~/pivpn/enrol/pending/$BOX.json" 2>/dev/null) || die "no pending request for $BOX (./hapi-approve.sh --list)"
+req=$(onprod "cat ~/pivpn/enrol/pending/$BOX.json" 2>/dev/null) || die "no pending request for $BOX (./hapi-approve.sh --list)"
 python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print("%s: %s, %s, image %s\n  from %s, first seen %s, last seen %s" % (d["box"], d["mac"], d.get("model",""), d.get("image",""), d["addr"], d["first_seen"], d["last_seen"]))' <<<"$req"
 if [ "$YES" != 1 ]; then
     [ -t 0 ] || die "confirm with -y when not run from a terminal"
@@ -136,7 +135,7 @@ if [ "$YES" != 1 ]; then
 fi
 
 # --- 1. prod: sign, address, ccd, profile ---------------------------------------------
-IP=$(ssh "${SSHOPT[@]}" "$PROD" bash -s -- "$BOX" "$SITE" "${WANT:--}" <<'EOF'
+IP=$(onprod bash -s -- "$BOX" "$SITE" "${WANT:--}" <<'EOF'
 set -eu
 box=$1 site=$2 want=$3
 [ "$want" != - ] || want=""
@@ -190,7 +189,7 @@ echo "$SITE: certificate signed for $BOX, tunnel address $IP; waiting for the bo
 since=$(date -u +%s)
 for ((i = 0; i < 72; i++)); do
     sleep 5
-    if ssh "${SSHOPT[@]}" "$PROD" "ping -c1 -W2 $IP >/dev/null"; then up=1; break; fi
+    if onprod "ping -c1 -W2 $IP >/dev/null"; then up=1; break; fi
 done
 [ "${up:-0}" = 1 ] || die "$BOX not on the VPN after 6 min: approval stands; check the box (on site: is it on the network?) and run this again with the same box and site to retry the adoption"
 echo "$BOX: on the VPN after ~$(( $(date -u +%s) - since )) s"
@@ -198,12 +197,12 @@ echo "$BOX: on the VPN after ~$(( $(date -u +%s) - since )) s"
 # --- 3. adopt over the VPN ------------------------------------------------------------
 # a box reusing an address has new host keys: here, and on prod (hapi-collect)
 ssh-keygen -R "$IP" >/dev/null 2>&1 || true
-ssh "${SSHOPT[@]}" "$PROD" "ssh-keygen -R $IP" >/dev/null 2>&1 || true
+onprod "ssh-keygen -R $IP" >/dev/null 2>&1 || true
 "$HERE/hapi-build.sh" "$IP"
 
 # --- 4. register -------------------------------------------------------------------
 reg_assign "$BOX" "$SITE" "$IP" "Enrolled + approved for $SITE $(date +%F)"
-PIOPT=("${SSHOPT[@]}" -J "$PROD")
+PIOPT=("${SSHOPT[@]}"); [ "$ON_PROD" = 1 ] || PIOPT+=(-J "$PROD")
 model=$(ssh "${PIOPT[@]}" "pivpn@$IP" "tr -d '\0' </proc/device-tree/model; echo -n ', Debian '; cat /etc/debian_version; echo -n ', '; sed -n 's/^image=//p' /etc/hapi/image")
 reg_build "$BOX" "approve $SITE $IP" "$model" "$(reg_hostkey "pivpn@$IP")" "$(reg_vpncert "$SITE")" "$(reg_field "$BOX" 7)"
 reg_push

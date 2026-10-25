@@ -27,7 +27,6 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HAMON="$(dirname "$HERE")"
-REGISTER="${REGISTER:-$HAMON/docs/hapi-devices.md}"
 PROD="${PROD:-greg@home.monitor-software.com}"
 # one shared connection per host for the whole run (ControlMaster): these
 # scripts make many short ssh calls, and a burst of new connections can be dropped
@@ -46,7 +45,7 @@ done
 PI=$1 SITE=$2
 # a tunnel address (10.86.0.N): through prod as the ssh jump host
 PIOPT=("${SSHOPT[@]}")
-[[ $PI == 10.86.* ]] && PIOPT+=(-J "$PROD")
+[[ $PI == 10.86.* ]] && [ ! -d "$HOME/pivpn/pki" ] && PIOPT+=(-J "$PROD")   # from the dev Pi: through prod
 die() { echo "hapi-assign: $*" >&2; exit 1; }
 [[ $SITE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "site names are letters, digits, _ . and - only"
 [ -z "$WANT" ] || [[ $WANT =~ ^[0-9]+$ && $WANT -ge 11 && $WANT -le 254 ]] || die "-i takes N from 11 to 254"
@@ -57,12 +56,12 @@ MAC=$(ssh "${PIOPT[@]}" "pivpn@$PI" cat /sys/class/net/eth0/address) ||
     die "can't log in as pivpn@$PI - built with hapi-build.sh?"
 DEV="hapi-$(tr -d : <<<"$MAC" | tail -c 7)"
 PW=$(reg_field "$DEV" 6)
-[ -n "$PW" ] || die "$DEV isn't in $REGISTER - build it with hapi-build.sh first"
+[ -n "$PW" ] || die "$DEV isn't in the register - build it with hapi-build.sh first"
 echo "$PI: $DEV"
 
 # --- prod: address and profile -----------------------------------------------
 # ssh joins the arguments into one command line, so an empty one would vanish: "-" = none
-IP=$(ssh "${SSHOPT[@]}" "$PROD" bash -s -- "$SITE" "${WANT:--}" "$RENEW" <<'EOF'
+IP=$(onprod bash -s -- "$SITE" "${WANT:--}" "$RENEW" <<'EOF'
 set -eu
 site=$1 want=$2 renew=$3
 [ "$want" != - ] || want=""
@@ -101,8 +100,8 @@ echo "$SITE: tunnel address $IP"
 # to the previous profile if the new one doesn't connect in 2 min - the ssh
 # session (on site: through this very tunnel) may drop with the restart. A Pi
 # built before the switcher gets a plain restart.
-since=$(ssh "${SSHOPT[@]}" "$PROD" date -u +%Y-%m-%dT%H:%M:%SZ)
-{ printf '%s\n' "$PW"; ssh "${SSHOPT[@]}" "$PROD" cat "pivpn/clients/$SITE.ovpn"; } |
+since=$(onprod date -u +%Y-%m-%dT%H:%M:%SZ)
+{ printf '%s\n' "$PW"; onprod cat "pivpn/clients/$SITE.ovpn"; } |
     ssh "${PIOPT[@]}" "pivpn@$PI" "sudo -k -S -p '' sh -c 'umask 077; cat >/etc/openvpn/client/pivpn.conf.new &&
         [ \"\$(head -1 /etc/openvpn/client/pivpn.conf.new)\" = client ] && systemctl enable -q openvpn-client@pivpn &&
         if [ -x /usr/local/sbin/hapi-vpn-swap ]; then
@@ -131,7 +130,7 @@ else
     # status file can still list the old one for up to 60 s)
     for ((i = 0; i < 24; i++)); do
         sleep 5
-        if ssh "${SSHOPT[@]}" "$PROD" "docker logs --since $since pivpn-server 2>&1" |
+        if onprod "docker logs --since $since pivpn-server 2>&1" |
                 grep -q "\[$SITE\] Peer Connection Initiated"; then
             up=1; break
         fi
@@ -139,14 +138,14 @@ else
 fi
 [ "$up" = 1 ] || die "$SITE not up on the new profile after $(( (i + 1) * 5 )) s: on the Pi, journalctl -u openvpn-client@pivpn"
 echo "$SITE: up on the new profile after ~$(( (i + 1) * 5 )) s"
-ssh "${SSHOPT[@]}" "$PROD" "ping -c 3 -W 2 $IP >/dev/null" && echo "$IP answers from prod" ||
+onprod "ping -c 3 -W 2 $IP >/dev/null" && echo "$IP answers from prod" ||
     echo "warning: $IP doesn't answer ping from prod yet"
 
 # --- renewed: the old certificate goes once the Pi is on the new one -----------------
 if [ "$RENEW" = 1 ]; then
     # the CRL runs to the CA's expiry like everything else: easy-rsa's default
     # is 180 days, and an expired CRL makes the server refuse every client
-    ssh "${SSHOPT[@]}" "$PROD" 'days=$(( ($(date -u -d "$(openssl x509 -noout -enddate -in ~/pivpn/pki/ca.crt | cut -d= -f2)" +%s) - $(date +%s)) / 86400 - 1 ))
+    onprod 'days=$(( ($(date -u -d "$(openssl x509 -noout -enddate -in ~/pivpn/pki/ca.crt | cut -d= -f2)" +%s) - $(date +%s)) / 86400 - 1 ))
         docker exec --user $(id -u) -e EASYRSA_PKI=/etc/pivpn/pki -e EASYRSA_BATCH=1 -e EASYRSA_CRL_DAYS=$days pivpn-server sh -c "/usr/share/easy-rsa/easyrsa revoke-renewed '"$SITE"' && /usr/share/easy-rsa/easyrsa gen-crl"' >/dev/null &&
         echo "$SITE: old certificate revoked (CRL updated)" ||
         echo "warning: revoking the old $SITE certificate failed - easyrsa revoke-renewed $SITE + gen-crl by hand"
@@ -154,16 +153,14 @@ fi
 
 # --- what the agent sees, through the tunnel (as hapi-collect will) ------------------
 echo "hapi-agent on $DEV, over the VPN:"
-ssh "${SSHOPT[@]}" "$PROD" "ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new pivpn@$IP 'sudo -n hapi-agent run'" ||
+onprod "ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new pivpn@$IP 'sudo -n hapi-agent run'" ||
     echo "  (see above: on the bench this is often 'no gateway' or several - fine until it is on site)"
 
 # --- register --------------------------------------------------------------------
-if [ -f "$REGISTER" ]; then
-    reg_assign "$DEV" "$SITE" "$IP" "Assigned to $SITE $(date +%F)"
-    model=$(ssh "${PIOPT[@]}" "pivpn@$PI" "tr -d '\0' </proc/device-tree/model; echo -n ', Debian '; cat /etc/debian_version")
-    reg_build "$DEV" "assign $SITE $IP" "$model" "$(reg_hostkey "pivpn@$PI")" "$(reg_vpncert "$SITE")" "$(reg_field "$DEV" 7)"
-    reg_push
-fi
+reg_assign "$DEV" "$SITE" "$IP" "Assigned to $SITE $(date +%F)"
+model=$(ssh "${PIOPT[@]}" "pivpn@$PI" "tr -d '\0' </proc/device-tree/model; echo -n ', Debian '; cat /etc/debian_version")
+reg_build "$DEV" "assign $SITE $IP" "$model" "$(reg_hostkey "pivpn@$PI")" "$(reg_vpncert "$SITE")" "$(reg_field "$DEV" 7)"
+reg_push
 echo
 echo "hamon-upload / hamon.yml for $SITE: dns $IP, port 3671"
 echo "before it leaves the bench: ./hapi-build.sh --ship $PI"

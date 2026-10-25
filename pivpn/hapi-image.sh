@@ -120,11 +120,12 @@ for m in dev dev/pts proc sys; do sudo mount --bind "/$m" "$MNT/$m"; done
 
 # --- 3. our install, in image mode ----------------------------------------------------
 step "install (chroot, image mode)"
-keys=$(cat ~/.ssh/id_ed25519.pub) || die "no ~/.ssh/id_ed25519.pub"
-prodkey=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$PROD" cat .ssh/id_ed25519.pub) || die "can't read prod's key from $PROD"
+# the keys every box gets: prod's list (the dev Pi's and prod's)
+keys=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$PROD" cat pivpn/hapi-authorized_keys | grep '^ssh-') ||
+    die "no keys in $PROD:pivpn/hapi-authorized_keys"
 sudo mkdir -p "$MNT/tmp/hapi-build"
 sudo cp "$HERE"/pi/hapi-* "$HERE"/pi/hapi.sudoers "$MNT/tmp/hapi-build/"
-printf '%s\n%s\n' "$keys" "$prodkey" | sudo tee "$MNT/tmp/hapi-build/authorized_keys" >/dev/null
+printf '%s\n' "$keys" | sudo tee "$MNT/tmp/hapi-build/authorized_keys" >/dev/null
 # DNS for apt inside the chroot, and no daemons started by package scripts
 sudo cp -a "$MNT/etc/resolv.conf" "$WORK/resolv.conf.orig" 2>/dev/null || true
 sudo rm -f "$MNT/etc/resolv.conf"
@@ -168,7 +169,7 @@ check "a setup code is set" "[ ! -e $MNT/etc/hapi/setup-code ]"
 check "a VPN profile is present" "[ -z \"\$(ls $MNT/etc/openvpn/client/ 2>/dev/null)\" ]"
 check "pivpn has a password" "sudo grep -q '^pivpn:!' $MNT/etc/shadow"
 check "hapi-adopt missing" "sudo test -f $MNT/etc/sudoers.d/hapi-adopt"
-check "pivpn's keys missing" "[ \"\$(sudo grep -c ssh- $MNT/home/pivpn/.ssh/authorized_keys)\" = 2 ]"
+check "pivpn's keys missing" "[ \"\$(sudo grep -c ssh- $MNT/home/pivpn/.ssh/authorized_keys)\" -ge 2 ]"
 check "ssh password login not off" "sudo grep -q '^PasswordAuthentication no' $MNT/etc/ssh/sshd_config.d/01-hapi.conf"
 check "cloud-init not disabled" "[ -e $MNT/etc/cloud/cloud-init.disabled ]"
 check "user wizard still enabled" "[ ! -L $MNT/etc/systemd/system/multi-user.target.wants/userconfig.service ]"

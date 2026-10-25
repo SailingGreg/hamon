@@ -4,13 +4,14 @@
 #
 #   ./hapi-sheet.sh <hapi-xxxxxx>
 #
-# Writes docs/labels/<device>-install.pdf (local only, mode 600: it carries the
-# setup code): what to bring, the steps to plug it in, and the setup page with
+# Writes <device>-install.html, and .pdf where chromium is installed (the dev
+# Pi), in ~/pivpn/labels on prod or docs/labels elsewhere (mode 600: it carries
+# the setup code): what to bring, the steps to plug it in, and the setup page with
 # a QR code of its address and the setup code. Site-neutral: the sheet names
 # the box, not the site. hapi-build.sh makes it after every build and --ship,
 # next to the label; send it to the installer yourself.
 #
-# Needs qrencode and chromium (headless, to print the PDF).
+# Needs qrencode; chromium (headless) for the PDF.
 #
 
 set -euo pipefail
@@ -18,15 +19,15 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HAMON="$(dirname "$HERE")"
 REGISTER="${REGISTER:-$HAMON/docs/hapi-devices.md}"
-OUTDIR="${OUTDIR:-$HAMON/docs/labels}"
+OUTDIR="${OUTDIR:-}"
 
 [ "$#" -eq 1 ] || { echo "usage: $0 <hapi-xxxxxx>" >&2; exit 2; }
 DEV=$1
 die() { echo "hapi-sheet: $*" >&2; exit 1; }
 . "$HERE/hapi-register.sh"
 command -v qrencode >/dev/null || die "needs qrencode (apt install qrencode)"
-CHROMIUM=$(command -v chromium || command -v chromium-browser || true)
-[ -n "$CHROMIUM" ] || die "needs chromium (apt install chromium)"
+CHROMIUM=$(command -v chromium || command -v chromium-browser || true)   # PDF only where present
+[ -n "$OUTDIR" ] || { [ "$ON_PROD" = 1 ] && OUTDIR=~/pivpn/labels || OUTDIR="$HAMON/docs/labels"; }
 
 CODE=$(reg_field "$DEV" 7)
 [ -n "$CODE" ] || die "$DEV has no setup code in $REGISTER"
@@ -106,9 +107,15 @@ cat >"$tmp/sheet.html" <<EOF
 </body></html>
 EOF
 
+html="$OUTDIR/$DEV-install.html"
+cp "$tmp/sheet.html" "$html" && chmod 600 "$html"
+if [ -z "$CHROMIUM" ]; then
+    echo "install sheet: $html (open it in a browser and print, or save as PDF)"
+    exit 0
+fi
 out="$OUTDIR/$DEV-install.pdf"
 "$CHROMIUM" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --no-pdf-header-footer \
     --print-to-pdf="$out" "file://$tmp/sheet.html" >/dev/null 2>&1 || die "chromium couldn't print the PDF"
 [ -s "$out" ] || die "no PDF written"
 chmod 600 "$out"
-echo "install sheet: $out"
+echo "install sheet: $out (and $html)"
