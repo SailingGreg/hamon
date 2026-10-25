@@ -56,7 +56,9 @@ reg_assign() {   # reg_assign <device> <site> <ip> <status>
     tmp=$(mktemp)
     awk -F'|' -v OFS='|' -v d="$1" -v s=" $2 " -v ip=" $3 " -v st="$4" '
         $2 ~ "^ *" d " *$" { $4 = s; $5 = ip
-                             sub(/^ *Assigned to [^;]*; */, "", $9); sub(/; not assigned to a site yet/, "", $9); sub(/ +$/, "", $9)
+                             # keep only the "Built ..." part of the old status
+                             if (match($9, /Built [^|]*/)) $9 = substr($9, RSTART, RLENGTH); else $9 = ""
+                             sub(/; not assigned to a site yet/, "", $9); sub(/ +$/, "", $9)
                              $9 = " " st "; " $9 " " }
         { print }' "$REGISTER" >"$tmp"
     reg_replace "$tmp"
