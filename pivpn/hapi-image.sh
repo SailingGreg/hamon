@@ -122,7 +122,11 @@ sudo rm -f "$WORK/resolv.conf.orig"
 sudo chroot "$MNT" sh -c '
     rm -rf /tmp/hapi-build /var/lib/apt/lists/* /var/cache/apt/*.bin /var/cache/apt/archives/*.deb
     rm -f /etc/ssh/ssh_host_* /root/.bash_history /var/lib/dbus/machine-id
-    : >/etc/machine-id
+    # "uninitialized", as in the official image, not empty: systemd treats only
+    # that (or no file) as a first boot, and the ssh host keys are made by
+    # first-boot units (regenerate_ssh_host_keys, sshd-keygen) - an empty file
+    # skipped them and sshd had no keys
+    echo uninitialized >/etc/machine-id
     find /var/log -type f -exec truncate -s 0 {} +
     true'
 
@@ -130,7 +134,7 @@ step "check: nothing secret or box-specific left"
 bad=0
 check() { if ! eval "$2"; then echo "   PROBLEM: $1"; bad=1; fi; }
 check "ssh host keys present" "[ -z \"\$(ls $MNT/etc/ssh/ssh_host_* 2>/dev/null)\" ]"
-check "machine-id not empty" "[ ! -s $MNT/etc/machine-id ]"
+check "machine-id is not 'uninitialized' (no first boot: no ssh host keys)" "[ \"\$(cat $MNT/etc/machine-id)\" = uninitialized ]"
 check "a setup code is set" "[ ! -e $MNT/etc/hapi/setup-code ]"
 check "a VPN profile is present" "[ -z \"\$(ls $MNT/etc/openvpn/client/ 2>/dev/null)\" ]"
 check "pivpn has a password" "sudo grep -q '^pivpn:!' $MNT/etc/shadow"
@@ -138,9 +142,11 @@ check "hapi-adopt missing" "sudo test -f $MNT/etc/sudoers.d/hapi-adopt"
 check "pivpn's keys missing" "[ \"\$(sudo grep -c ssh- $MNT/home/pivpn/.ssh/authorized_keys)\" = 2 ]"
 check "ssh password login not off" "sudo grep -q '^PasswordAuthentication no' $MNT/etc/ssh/sshd_config.d/01-hapi.conf"
 check "cloud-init not disabled" "[ -e $MNT/etc/cloud/cloud-init.disabled ]"
-check "user wizard still enabled" "[ ! -e $MNT/etc/systemd/system/multi-user.target.wants/userconfig.service ]"
+check "user wizard still enabled" "[ ! -L $MNT/etc/systemd/system/multi-user.target.wants/userconfig.service ]"
 check "pi user still there" "! grep -q '^pi:' $MNT/etc/passwd"
-check "host key regeneration not enabled" "sudo chroot $MNT systemctl is-enabled -q regenerate_ssh_host_keys.service"
+check "host key regeneration not enabled" "[ -L $MNT/etc/systemd/system/sysinit.target.wants/regenerate_ssh_host_keys.service ]"
+check "hostname unit not enabled" "[ -L $MNT/etc/systemd/system/sysinit.target.wants/hapi-hostname.service ]"
+check "ssh not enabled" "[ -L $MNT/etc/systemd/system/multi-user.target.wants/ssh.service ]"
 check "image stamp missing" "[ -s $MNT/etc/hapi/image ]"
 [ "$bad" = 0 ] || die "image check failed - nothing written to $OUT"
 echo "   ok"

@@ -102,6 +102,9 @@ install -m 600 -o pivpn -g pivpn authorized_keys ~pivpn/.ssh/authorized_keys
 id hapi >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin hapi
 
 step "ssh: keys only, no root"
+# Raspberry Pi OS's user wizard (off on our boxes) leaves an ssh banner saying
+# ssh may not work until a user is set up
+rm -f /etc/ssh/sshd_config.d/rename_user.conf
 cat >/etc/ssh/sshd_config.d/01-hapi.conf <<'EOF'
 # hapi site Pi (pivpn/pi/hapi-install.sh)
 PasswordAuthentication no
