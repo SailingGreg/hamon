@@ -3,7 +3,9 @@
 # hapi-build.sh  -  build a site Pi on the bench, from the dev Pi.
 #
 # Flash Raspberry Pi OS Lite 64-bit with Raspberry Pi Imager, with ssh on
-# and this machine's public key for the first user (any name). Boot it on
+# and this machine's public key for the first user (any name) - or the HAMON
+# image (pivpn/hapi-image.sh), which has pivpn and our keys already: then
+# this run adopts the box (password, setup code, register, lock-down). Boot it on
 # the bench LAN, find it (./hapi-find.sh), then:
 #
 #   ./hapi-build.sh [-u <imager-user>] <pi-address>
@@ -161,8 +163,9 @@ else
     reg_build "$DEV" build "$model" "$(reg_hostkey "pivpn@$PI")" "$(reg_vpncert "$site")" "$CODE"
     reg_push
 
-    # Imager's passwordless sudo and its user go only now that pivpn works
-    as_root pivpn "$PW" "rm -f /etc/sudoers.d/010_pi-nopasswd
+    # Imager's passwordless sudo (or the HAMON image's hapi-adopt) and the Imager
+    # user go only now that pivpn works with its password
+    as_root pivpn "$PW" "rm -f /etc/sudoers.d/010_pi-nopasswd /etc/sudoers.d/hapi-adopt
         if [ '$LOGIN' != pivpn ] && id '$LOGIN' >/dev/null 2>&1; then
             usermod -L '$LOGIN'; rm -f ~$LOGIN/.ssh/authorized_keys
             echo 'Imager user $LOGIN locked (no password, no ssh keys)'
@@ -173,7 +176,7 @@ fi
 # sudoers: only hapi may grant anything without a password. The Raspberry Pi
 # OS files (010_global-tty, 010_proxy, ...) only set Defaults; Imager's
 # 010_pi-nopasswd must be gone. The files are root-only, so as root
-nopw=$(as_root pivpn "$PW" 'ls /etc/sudoers.d/010_pi-nopasswd 2>/dev/null
+nopw=$(as_root pivpn "$PW" 'ls /etc/sudoers.d/010_pi-nopasswd /etc/sudoers.d/hapi-adopt 2>/dev/null
     grep -l NOPASSWD /etc/sudoers.d/* | grep -vx /etc/sudoers.d/hapi; true' </dev/null)
 [ -z "$nopw" ] || echo "PROBLEM: passwordless sudo from $(echo $nopw)"
 # the rest as pivpn in a fresh session

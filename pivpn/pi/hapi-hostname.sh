@@ -17,7 +17,11 @@ old=$(hostname)
 
 [ "$old" = "$name" ] && exit 0
 
-hostnamectl set-hostname "$name"
+# directly, not with hostnamectl: this runs early in boot (before the network
+# and D-Bus), where hostnamectl can't reach systemd-hostnamed - on a first boot
+# from the HAMON image the box would keep the image's name
+echo "$name" >/etc/hostname
+hostname "$name"
 if grep -q '^127\.0\.1\.1' /etc/hosts; then
   sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$name/" /etc/hosts
 else

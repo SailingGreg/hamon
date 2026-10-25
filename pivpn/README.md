@@ -21,6 +21,18 @@ Pick a free N with `grep -h ifconfig-push ~/pivpn/ccd/*`.
 
 ## Add a site
 
+Two ways to start a box (kept side by side, docs/hapi-image.md):
+
+- **HAMON image:** `./hapi-image.sh` on devserver builds `~/hapi-image/out/hamon-hapi-YYYYMMDD.img.xz`
+  from the official Raspberry Pi OS Lite 64-bit image, with everything installed and nothing
+  box-specific (no host keys, no secrets; `pivpn` with our keys and no password, and a
+  temporary passwordless sudo, `hapi-adopt`, until adoption). Write it with Raspberry Pi
+  Imager (Use custom, **no** OS customisation), boot it on Ethernet: it names itself and makes
+  its own ssh host keys on first boot. Step 3 below then only *adopts* it (about a minute:
+  password, setup code, register, `hapi-adopt` removed). For the integrator's self-install
+  (phase 2, enrolment) see docs/hapi-image.md. Test-boot every new image before handing it on.
+- **Standard image:** Raspberry Pi OS Lite from Imager as below; step 3 installs everything.
+
 Everything runs from the dev Pi, in `pivpn/`. The Pi on the bench needs only Raspberry Pi
 OS Lite 64-bit (Bookworm or Trixie; a Pi 3B+ or later) and a network.
 
