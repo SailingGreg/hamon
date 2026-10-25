@@ -91,7 +91,7 @@ if [ -f "$P/pki/issued/$site.crt" ]; then
     "${E[@]}" /usr/share/easy-rsa/easyrsa gen-crl >/dev/null
     echo "$site: certificate revoked (CRL to the CA's expiry)"
 fi
-rm -f "$P/ccd/$site" "$P/clients/$site.tc2" "$P/enrol/approved/$box.json" "$P/enrol/approved/$box.ovpn" "$P/enrol/refused/$box.json"
+rm -f "$P/ccd/$site" "$P/clients/$site.tc2" "$P/pki/reqs/$site.req" "$P/enrol/approved/$box.json" "$P/enrol/approved/$box.ovpn" "$P/enrol/refused/$box.json"
 ssh-keygen -R "$ip" >/dev/null 2>&1 || true
 echo "$box: approval cleared, $ip free"
 PRODEOF
@@ -153,6 +153,9 @@ ip=10.86.0.$n
 days=$(( ($(date -u -d "$(openssl x509 -noout -enddate -in "$P/pki/ca.crt" | cut -d= -f2)" +%s) - $(date +%s)) / 86400 - 1 ))
 [ "$days" -le 3650 ] || days=3650
 umask 077
+trap 'rm -f "$P/enrol/$box.csr"' EXIT
+# a request left from an earlier certificate for this name (revoked by --forget)
+[ -f "$P/pki/reqs/$site.req" ] && rm -f "$P/pki/reqs/$site.req"
 python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["csr"])' "$P/enrol/pending/$box.json" >"$P/enrol/$box.csr"
 E=(docker exec --user "$(id -u)" -e EASYRSA_PKI=/etc/pivpn/pki -e EASYRSA_BATCH=1 -e EASYRSA_CERT_EXPIRE="$days" pivpn-server)
 "${E[@]}" /usr/share/easy-rsa/easyrsa import-req "/etc/pivpn/enrol/$box.csr" "$site" >/dev/null
