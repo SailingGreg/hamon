@@ -55,9 +55,11 @@ PW=$(reg_field "$DEV" 6)
 echo "$PI: $DEV"
 
 # --- prod: address and profile -----------------------------------------------
-IP=$(ssh "${SSHOPT[@]}" "$PROD" bash -s -- "$SITE" "$WANT" "$RENEW" <<'EOF'
+# ssh joins the arguments into one command line, so an empty one would vanish: "-" = none
+IP=$(ssh "${SSHOPT[@]}" "$PROD" bash -s -- "$SITE" "${WANT:--}" "$RENEW" <<'EOF'
 set -eu
 site=$1 want=$2 renew=$3
+[ "$want" != - ] || want=""
 ccd=~/pivpn/ccd
 if [ -f "$ccd/$site" ]; then
     ip=$(awk '/^ifconfig-push/ {print $2}' "$ccd/$site")
