@@ -36,10 +36,7 @@ die() { echo "hapi-assign: $*" >&2; exit 1; }
 [[ $SITE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "site names are letters, digits, _ . and - only"
 [ -z "$WANT" ] || [[ $WANT =~ ^[0-9]+$ && $WANT -ge 11 && $WANT -le 254 ]] || die "-i takes N from 11 to 254"
 
-reg_field() {
-    [ -f "$REGISTER" ] || return 0
-    awk -F'|' -v d="$1" -v n="$2" '$2 ~ "^ *" d " *$" { f = $(n + 1); gsub(/[ `]/, "", f); print f; exit }' "$REGISTER"
-}
+. "$HERE/hapi-register.sh"
 
 MAC=$(ssh "${SSHOPT[@]}" "pivpn@$PI" cat /sys/class/net/eth0/address) ||
     die "can't log in as pivpn@$PI - built with hapi-build.sh?"
@@ -102,17 +99,11 @@ ssh "${SSHOPT[@]}" "$PROD" "ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictH
 
 # --- register --------------------------------------------------------------------
 if [ -f "$REGISTER" ]; then
-    awk -F'|' -v OFS='|' -v d="$DEV" -v s=" $SITE " -v ip=" $IP " -v st="Assigned to $SITE $(date +%F)" '
-        $2 ~ "^ *" d " *$" { $4 = s; $5 = ip
-                             sub(/^ *Assigned to [^;]*; */, "", $9); sub(/; not assigned to a site yet/, "", $9); sub(/ +$/, "", $9)
-                             $9 = " " st "; " $9 " " }
-        { print }' "$REGISTER" >"$REGISTER.tmp" && cat "$REGISTER.tmp" >"$REGISTER" && rm -f "$REGISTER.tmp"
-    chmod 600 "$REGISTER"
-    scp -q "${SSHOPT[@]}" "$REGISTER" "$PROD:pivpn/hapi-devices.md" &&
-        ssh "${SSHOPT[@]}" "$PROD" chmod 600 pivpn/hapi-devices.md &&
-        echo "register updated here and copied to prod"
+    reg_assign "$DEV" "$SITE" "$IP" "Assigned to $SITE $(date +%F)"
+    model=$(ssh "${SSHOPT[@]}" "pivpn@$PI" "tr -d '\0' </proc/device-tree/model; echo -n ', Debian '; cat /etc/debian_version")
+    reg_build "$DEV" "assign $SITE $IP" "$model" "$(reg_hostkey "pivpn@$PI")" "$(reg_vpncert "$SITE")" "$(reg_field "$DEV" 7)"
+    reg_push
 fi
-
 echo
 echo "hamon-upload / hamon.yml for $SITE: dns $IP, port 3671"
 echo "before it leaves the bench: ./hapi-build.sh --ship $PI"

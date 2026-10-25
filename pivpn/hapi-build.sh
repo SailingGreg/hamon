@@ -16,8 +16,9 @@
 #
 # The pivpn password and the setup code are three random words each, made
 # here, sent over ssh on stdin, and recorded in the device register
-# (docs/hapi-devices.md: local only, 600). A re-run keeps them; -n makes new
-# ones. Re-runs log in as pivpn and use its password for sudo.
+# (docs/hapi-devices.md: local only, 600, copied to prod; see
+# hapi-register.sh), with a Builds row per run: ssh host key fingerprint,
+# VPN certificate, setup code. A re-run keeps them; -n makes new ones. Re-runs log in as pivpn and use its password for sudo.
 #
 #   -u <user>   the user Imager created (default pivpn); flashed with a
 #               password instead of a key, the first run installs this
@@ -58,30 +59,7 @@ words() {
     grep -E '^[a-z]{4,7}$' /usr/share/dict/words | shuf -n 3 --random-source=/dev/urandom | paste -sd-
 }
 
-# a register row's field for a device: 6 = password, 7 = setup code
-reg_field() {
-    [ -f "$REGISTER" ] || return 0
-    awk -F'|' -v d="$1" -v n="$2" '$2 ~ "^ *" d " *$" { f = $(n + 1); gsub(/[ `]/, "", f); print f; exit }' "$REGISTER"
-}
-
-# write or replace the device's register row (the table of "| hapi-" lines)
-reg_row() {
-    local row=$1 dev=$2 tmp at
-    [ -f "$REGISTER" ] || die "no register at $REGISTER - the row to add by hand: $row"
-    tmp=$(mktemp)
-    if grep -q "^| *$dev *|" "$REGISTER"; then
-        awk -v d="$dev" -v row="$row" '$0 ~ "^\\| *" d " *\\|" { print row; next } { print }' "$REGISTER" >"$tmp"
-    else
-        # a new device: after the last device row, or the table's header
-        at=$(grep -n '^| *hapi-' "$REGISTER" | tail -1 | cut -d: -f1)
-        [ -n "$at" ] || at=$(grep -n '^|---' "$REGISTER" | head -1 | cut -d: -f1)
-        [ -n "$at" ] || { rm -f "$tmp"; die "no device table in $REGISTER - the row to add by hand: $row"; }
-        awk -v at="$at" -v row="$row" '{ print } NR == at { print row }' "$REGISTER" >"$tmp"
-    fi
-    cat "$tmp" >"$REGISTER"
-    rm -f "$tmp"
-    chmod 600 "$REGISTER"
-}
+. "$HERE/hapi-register.sh"
 
 # root on the Pi: passwordless (fresh image) or pivpn's password on stdin
 as_root() {   # as_root <user> <password-or-empty> <command> ; rest of stdin follows
@@ -91,6 +69,10 @@ as_root() {   # as_root <user> <password-or-empty> <command> ; rest of stdin fol
     else
         { printf '%s\n' "$pw"; cat; } | ssh "${SSHOPT[@]}" "$user@$PI" "sudo -S -p '' bash -c $(printf %q "$cmd")"
     fi
+}
+
+model_os() {
+    ssh "${SSHOPT[@]}" "pivpn@$PI" "tr -d '\0' </proc/device-tree/model; echo -n ', Debian '; cat /etc/debian_version"
 }
 
 # --- who is it ----------------------------------------------------------------
@@ -137,6 +119,8 @@ if [ "$SHIP" = 1 ]; then
         fi
         [ -d /etc/cloud ] && touch /etc/cloud/cloud-init.disabled
         echo "bench gateway choice and forward cleared; Imager seed scrubbed"' </dev/null
+    reg_build "$DEV" ship "$(model_os)" "$(reg_hostkey "pivpn@$PI")" "$(reg_vpncert "$(reg_field "$DEV" 3)")" "$CODE"
+    reg_push
 else
     # --- build -------------------------------------------------------------------
     if [ "$NEWSECRETS" = 1 ] || [ -z "$PW" ] || [ -z "$CODE" ]; then
@@ -169,11 +153,13 @@ else
     printf '%s\n%s\n' "$PW" "$CODE" |
         as_root "$LOGIN" "$sudopw" 'bash /tmp/hapi-build/hapi-install.sh; rc=$?; rm -rf /tmp/hapi-build; exit $rc'
 
-    model=$(ssh "${SSHOPT[@]}" "pivpn@$PI" "tr -d '\0' </proc/device-tree/model; echo -n ', Debian '; cat /etc/debian_version") ||
-        die "pivpn can't log in with this machine's key after the install"
+    model=$(model_os) || die "pivpn can't log in with this machine's key after the install"
     site=$(reg_field "$DEV" 3) ip=$(reg_field "$DEV" 4)
-    reg_row "| $DEV | $MAC | ${site:-} | ${ip:-} | pivpn | \`$PW\` | \`$CODE\` | Built $(date +%F), $model; not assigned to a site yet |" "$DEV"
-    echo "register: $REGISTER updated"
+    status="Built $(date +%F), $model; not assigned to a site yet"
+    [ -z "$site" ] || status="Assigned to $site; Built $(date +%F), $model"
+    reg_row "| $DEV | $MAC | ${site:-} | ${ip:-} | pivpn | \`$PW\` | \`$CODE\` | $status |" "$DEV"
+    reg_build "$DEV" build "$model" "$(reg_hostkey "pivpn@$PI")" "$(reg_vpncert "$site")" "$CODE"
+    reg_push
 
     # Imager's passwordless sudo and its user go only now that pivpn works
     as_root pivpn "$PW" "rm -f /etc/sudoers.d/010_pi-nopasswd
