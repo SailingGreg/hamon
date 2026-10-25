@@ -45,12 +45,18 @@ OS Lite 64-bit (Bookworm or Trixie; a Pi 3B+ or later) and a network.
    prod to the Pi, starts the VPN, waits for the Pi on the server, runs `hapi-agent`
    through the tunnel and copies the register to prod. It prints the hamon-upload values:
    `dns 10.86.0.N`, port 3671.
-5. **Ship:** on Ethernet, `./hapi-build.sh --ship <ip>` clears the bench gateway choice and
+5. **Bench test** (optional, recommended): `./hapi-benchtest.sh <ip>` runs `pi/fake-gateway.py`
+   on the dev Pi, has the Pi's agent choose it, then from prod connects a KNX tunnel to
+   `10.86.0.N:3671` the way hamon does: proves prod → VPN → Pi → gateway. Needs UDP 3671
+   free on the dev Pi.
+6. **Ship:** on Ethernet, `./hapi-build.sh --ship <ip>` clears the bench gateway choice and
    forward, removes Wi-Fi profiles (it refuses while the Pi is still on Wi-Fi), scrubs
    Imager's cloud-init seed on the boot partition (on Trixie it holds the bench Wi-Fi
    password and the Imager user's password hash; the build already disabled cloud-init) and
    re-checks the lock-down. Run it via the Pi's Ethernet address, not its Wi-Fi one. Print
-   the label.
+   the label: `docs/labels/<device>.png` (62 × 29 mm at 300 dpi; hostname, `.local` address
+   with a QR code of it, setup code; local only, mode 600), written by every build and ship,
+   or `./hapi-label.sh <device>` (`LABEL_MM=WxH` for another size).
 
 **Device register** (`docs/hapi-devices.md`: local only, mode 600, copied to prod's
 `~/pivpn/hapi-devices.md` by the scripts; it holds secrets). The device table has one row per
@@ -164,19 +170,22 @@ The CRL is re-read on every connection. Deleting the ccd file also blocks the cl
 
 ## Certificate lifetimes
 
-Client certificates last **825 days** (easy-rsa default). Renew before then:
+Client certificates run to the **CA's expiry (2036-10-05), at most 10 years** (`pivpn-add`;
+easy-rsa's default was 825 days); revoke one to end it early. The register's Builds table
+shows each Pi's expiry. To renew a site's certificate: `./hapi-assign.sh -r <ip> <site>`
+(renews, installs the new profile, and once the Pi is on it revokes the old certificate and
+updates the CRL).
+
+The **server** certificate: renew it before it expires, or every site drops at once:
 
 ```bash
 docker exec --user "$(id -u)" -e EASYRSA_PKI=/etc/pivpn/pki -e EASYRSA_BATCH=1 \
-  pivpn-server /usr/share/easy-rsa/easyrsa renew <name>
+  -e EASYRSA_CERT_EXPIRE=<days to the CA expiry> pivpn-server /usr/share/easy-rsa/easyrsa renew server
+docker restart pivpn-server      # sites reconnect within about a minute
 ```
 
-Then re-run `pivpn-add <name> …` to refresh the `.ovpn` and copy it to the Pi. With
-easy-rsa 3.1 (in the image) the old certificate stays valid until revoked, so once the Pi is on
-the new one, run `easyrsa revoke-renewed <name>` and `easyrsa gen-crl` the same way.
-
-The **server** certificate also lasts 825 days, and when it expires every site drops, so renew it
-(`renew server`, then `docker restart pivpn-server`) well before. The CA and CRL last 10 years.
+The CA and CRL last 10 years: the CA's expiry is the hard limit for everything, so plan a new
+CA (and new client certificates for every Pi) well before 2036-10.
 
 ## Server lifecycle
 

@@ -195,5 +195,6 @@ ssh "${SSHOPT[@]}" "pivpn@$PI" '
     exit $bad' && [ -z "$nopw" ]
 
 echo
+"$HERE/hapi-label.sh" "$DEV" || echo "(no label image: see hapi-label.sh)"
 echo "label:  $DEV    setup code: $CODE"
 [ "$SHIP" = 1 ] && echo "ready to ship" || echo "next:   ./hapi-assign.sh $PI <site>"
