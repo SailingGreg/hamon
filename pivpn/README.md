@@ -56,7 +56,10 @@ OS Lite 64-bit (Bookworm or Trixie; a Pi 3B+ or later) and a network.
    re-checks the lock-down. Run it via the Pi's Ethernet address, not its Wi-Fi one. Print
    the label: `docs/labels/<device>.png` (62 × 29 mm at 300 dpi; hostname, `.local` address
    with a QR code of it, setup code; local only, mode 600), written by every build and ship,
-   or `./hapi-label.sh <device>` (`LABEL_MM=WxH` for another size).
+   or `./hapi-label.sh <device>` (`LABEL_MM=WxH` for another size). The installer's copy is
+   `docs/labels/<device>-install.pdf`: one A4 page with what to bring, the steps on site, and
+   the setup page with its QR code and setup code (site-neutral; local only, mode 600; send it
+   yourself), also from every build and ship, or `./hapi-sheet.sh <device>`.
 
 **A Pi on site (remote mode).** Give the scripts the Pi's tunnel address instead of a LAN
 address and they reach it through prod as the ssh jump host (`ssh -J`), e.g. for the bench
