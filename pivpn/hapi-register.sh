@@ -11,7 +11,7 @@
 #   ## Builds          one row per hapi-build / hapi-assign / --ship run:
 #     | Date | Device | Step | hamon | Model, OS | ssh host key (ED25519) | VPN certificate | Setup code |
 #
-# The caller sets REGISTER, PROD and SSHOPT and defines die().
+# The caller sets REGISTER, PROD, SSHOPT (prod) and PIOPT (the Pi) and defines die().
 
 # a device row's field: 2 = MAC, 3 = site, 4 = tunnel IP, 6 = password, 7 = setup code
 reg_field() {
@@ -57,7 +57,7 @@ reg_assign() {   # reg_assign <device> <site> <ip> <status>
 
 # the Pi's ssh host key fingerprint (ED25519, SHA256), as ssh shows it
 reg_hostkey() {   # reg_hostkey <user@pi>
-    ssh "${SSHOPT[@]}" "$1" 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' 2>/dev/null | awk '{print $2}'
+    ssh "${PIOPT[@]}" "$1" 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' 2>/dev/null | awk '{print $2}'
 }
 
 # a site's VPN client certificate on prod: "CN, serial S, expires DATE"

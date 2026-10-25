@@ -44,13 +44,16 @@ while [ "$#" -gt 2 ]; do
 done
 [ "$#" -eq 2 ] || { echo "usage: $0 [-i <N>] [-r] <pi-address> <site>" >&2; exit 2; }
 PI=$1 SITE=$2
+# a tunnel address (10.86.0.N): through prod as the ssh jump host
+PIOPT=("${SSHOPT[@]}")
+[[ $PI == 10.86.* ]] && PIOPT+=(-J "$PROD")
 die() { echo "hapi-assign: $*" >&2; exit 1; }
 [[ $SITE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "site names are letters, digits, _ . and - only"
 [ -z "$WANT" ] || [[ $WANT =~ ^[0-9]+$ && $WANT -ge 11 && $WANT -le 254 ]] || die "-i takes N from 11 to 254"
 
 . "$HERE/hapi-register.sh"
 
-MAC=$(ssh "${SSHOPT[@]}" "pivpn@$PI" cat /sys/class/net/eth0/address) ||
+MAC=$(ssh "${PIOPT[@]}" "pivpn@$PI" cat /sys/class/net/eth0/address) ||
     die "can't log in as pivpn@$PI - built with hapi-build.sh?"
 DEV="hapi-$(tr -d : <<<"$MAC" | tail -c 7)"
 PW=$(reg_field "$DEV" 6)
@@ -94,29 +97,50 @@ EOF
 echo "$SITE: tunnel address $IP"
 
 # --- the Pi: profile in, VPN on ----------------------------------------------
-# the server's log from now on shows the Pi's new connection (the status file
-# can still list the old one for up to 60 s)
+# hapi-vpn-swap (installed by hapi-build) applies it detached and goes back
+# to the previous profile if the new one doesn't connect in 2 min - the ssh
+# session (on site: through this very tunnel) may drop with the restart. A Pi
+# built before the switcher gets a plain restart.
 since=$(ssh "${SSHOPT[@]}" "$PROD" date -u +%Y-%m-%dT%H:%M:%SZ)
 { printf '%s\n' "$PW"; ssh "${SSHOPT[@]}" "$PROD" cat "pivpn/clients/$SITE.ovpn"; } |
-    ssh "${SSHOPT[@]}" "pivpn@$PI" "sudo -k -S -p '' sh -c 'umask 077; cat >/etc/openvpn/client/pivpn.conf.new &&
-        [ \"\$(head -1 /etc/openvpn/client/pivpn.conf.new)\" = client ] && mv /etc/openvpn/client/pivpn.conf.new /etc/openvpn/client/pivpn.conf &&
-        systemctl enable -q openvpn-client@pivpn && systemctl restart openvpn-client@pivpn'" ||
-    die "installing the profile on the Pi failed"
-echo "$DEV: profile installed, VPN starting"
+    ssh "${PIOPT[@]}" "pivpn@$PI" "sudo -k -S -p '' sh -c 'umask 077; cat >/etc/openvpn/client/pivpn.conf.new &&
+        [ \"\$(head -1 /etc/openvpn/client/pivpn.conf.new)\" = client ] && systemctl enable -q openvpn-client@pivpn &&
+        if [ -x /usr/local/sbin/hapi-vpn-swap ]; then
+            rm -f /run/hapi/vpn-swap; systemd-run --quiet --collect --unit=hapi-vpn-swap /usr/local/sbin/hapi-vpn-swap
+        else
+            mv /etc/openvpn/client/pivpn.conf.new /etc/openvpn/client/pivpn.conf && systemctl restart openvpn-client@pivpn
+        fi'" || die "installing the profile on the Pi failed"
+swap=$(ssh "${PIOPT[@]}" "pivpn@$PI" 'test -x /usr/local/sbin/hapi-vpn-swap && echo yes' 2>/dev/null || true)
+echo "$DEV: profile installed, VPN restarting${swap:+ (falls back to the previous profile if it does not connect)}"
 
-# --- wait for it on the server ---------------------------------------------------
-for ((i = 0; i < 24; i++)); do
-    sleep 5
-    if ssh "${SSHOPT[@]}" "$PROD" "docker logs --since $since pivpn-server 2>&1" |
-            grep -q "\[$SITE\] Peer Connection Initiated"; then
-        up=1; break
-    fi
-done
-[ "${up:-0}" = 1 ] || die "$SITE not connected to the Pi-VPN server after 2 min: on the Pi, journalctl -u openvpn-client@pivpn"
-echo "$SITE: connected to the Pi-VPN server after ~$(((i + 1) * 5)) s"
-# the status log is refreshed every 60 s: ping to be sure it's this connection
+# --- wait for it -----------------------------------------------------------------
+up=0
+if [ "$swap" = yes ]; then
+    # the Pi says how it went: up, or restored (the old profile is back)
+    for ((i = 0; i < 60; i++)); do
+        sleep 5
+        st=$(ssh "${PIOPT[@]}" "pivpn@$PI" 'cat /run/hapi/vpn-swap 2>/dev/null' 2>/dev/null || true)
+        case "$st" in
+            up) up=1; break ;;
+            restored) die "the new profile didn't connect: the Pi went back to its previous profile and is up (old certificate kept)" ;;
+            restored-down|failed) die "the new profile didn't connect and the Pi is not up again ($st): on the Pi, journalctl -t hapi-vpn-swap" ;;
+        esac
+    done
+else
+    # the server's log since the install shows the Pi's new connection (the
+    # status file can still list the old one for up to 60 s)
+    for ((i = 0; i < 24; i++)); do
+        sleep 5
+        if ssh "${SSHOPT[@]}" "$PROD" "docker logs --since $since pivpn-server 2>&1" |
+                grep -q "\[$SITE\] Peer Connection Initiated"; then
+            up=1; break
+        fi
+    done
+fi
+[ "$up" = 1 ] || die "$SITE not up on the new profile after $(( (i + 1) * 5 )) s: on the Pi, journalctl -u openvpn-client@pivpn"
+echo "$SITE: up on the new profile after ~$(( (i + 1) * 5 )) s"
 ssh "${SSHOPT[@]}" "$PROD" "ping -c 3 -W 2 $IP >/dev/null" && echo "$IP answers from prod" ||
-    echo "warning: $IP doesn't answer ping from prod yet (the status log lags up to 60 s)"
+    echo "warning: $IP doesn't answer ping from prod yet"
 
 # --- renewed: the old certificate goes once the Pi is on the new one -----------------
 if [ "$RENEW" = 1 ]; then
@@ -136,7 +160,7 @@ ssh "${SSHOPT[@]}" "$PROD" "ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictH
 # --- register --------------------------------------------------------------------
 if [ -f "$REGISTER" ]; then
     reg_assign "$DEV" "$SITE" "$IP" "Assigned to $SITE $(date +%F)"
-    model=$(ssh "${SSHOPT[@]}" "pivpn@$PI" "tr -d '\0' </proc/device-tree/model; echo -n ', Debian '; cat /etc/debian_version")
+    model=$(ssh "${PIOPT[@]}" "pivpn@$PI" "tr -d '\0' </proc/device-tree/model; echo -n ', Debian '; cat /etc/debian_version")
     reg_build "$DEV" "assign $SITE $IP" "$model" "$(reg_hostkey "pivpn@$PI")" "$(reg_vpncert "$SITE")" "$(reg_field "$DEV" 7)"
     reg_push
 fi

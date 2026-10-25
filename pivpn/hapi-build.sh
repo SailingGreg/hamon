@@ -25,9 +25,9 @@
 #               machine's key with ssh-copy-id (prompts, or SSHPASS=<password>)
 #   -n          new password and setup code
 #   --ship      instead of building: clear the bench state before it goes to
-#               site (gateway choice, forward, Wi-Fi profiles, the bench Wi-Fi
-#               and Imager passwords in the boot partition's cloud-init seed)
-#               and re-check the sudo lock-down
+#               site (gateway choice, forward, Wi-Fi profiles) and re-check
+#               the sudo lock-down. Not for a Pi already on site: it would
+#               forget the installer's gateway choice
 #
 # PROD (default greg@home.monitor-software.com) is where prod's key comes from.
 #
@@ -55,6 +55,9 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$#" -eq 1 ] || { echo "usage: $0 [-u <imager-user>] [-n] [--ship] <pi-address>" >&2; exit 2; }
 PI=$1
+# a tunnel address (10.86.0.N): through prod as the ssh jump host
+PIOPT=("${SSHOPT[@]}")
+[[ $PI == 10.86.* ]] && PIOPT+=(-J "$PROD")
 die() { echo "hapi-build: $*" >&2; exit 1; }
 
 # three random lower-case words, like the existing ones
@@ -68,20 +71,20 @@ words() {
 as_root() {   # as_root <user> <password-or-empty> <command> ; rest of stdin follows
     local user=$1 pw=$2 cmd=$3
     if [ -z "$pw" ]; then
-        ssh "${SSHOPT[@]}" "$user@$PI" "sudo -n bash -c $(printf %q "$cmd")"
+        ssh "${PIOPT[@]}" "$user@$PI" "sudo -n bash -c $(printf %q "$cmd")"
     else
-        { printf '%s\n' "$pw"; cat; } | ssh "${SSHOPT[@]}" "$user@$PI" "sudo -k -S -p '' bash -c $(printf %q "$cmd")"
+        { printf '%s\n' "$pw"; cat; } | ssh "${PIOPT[@]}" "$user@$PI" "sudo -k -S -p '' bash -c $(printf %q "$cmd")"
     fi
 }
 
 model_os() {
-    ssh "${SSHOPT[@]}" "pivpn@$PI" "tr -d '\0' </proc/device-tree/model; echo -n ', Debian '; cat /etc/debian_version"
+    ssh "${PIOPT[@]}" "pivpn@$PI" "tr -d '\0' </proc/device-tree/model; echo -n ', Debian '; cat /etc/debian_version"
 }
 
 # --- who is it ----------------------------------------------------------------
 # an image flashed with a password rather than a key: install this machine's
 # key first (asks for the Imager password; or SSHPASS=<it> in the environment)
-if ! ssh "${SSHOPT[@]}" "$LOGIN@$PI" true 2>/dev/null; then
+if ! ssh "${PIOPT[@]}" "$LOGIN@$PI" true 2>/dev/null; then
     echo "$LOGIN@$PI: no key login yet - installing this machine's key"
     if [ -n "${SSHPASS:-}" ]; then
         sshpass -e ssh-copy-id -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_ed25519.pub "$LOGIN@$PI" >/dev/null 2>&1
@@ -89,7 +92,7 @@ if ! ssh "${SSHOPT[@]}" "$LOGIN@$PI" true 2>/dev/null; then
         ssh-copy-id -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_ed25519.pub "$LOGIN@$PI"
     fi
 fi
-MAC=$(ssh "${SSHOPT[@]}" "$LOGIN@$PI" cat /sys/class/net/eth0/address) ||
+MAC=$(ssh "${PIOPT[@]}" "$LOGIN@$PI" cat /sys/class/net/eth0/address) ||
     die "can't log in as $LOGIN@$PI with this machine's key (-u for the user Imager created)"
 DEV="hapi-$(tr -d : <<<"$MAC" | tail -c 7)"
 echo "$PI: $DEV (eth0 $MAC), logged in as $LOGIN"
@@ -115,16 +118,7 @@ if [ "$SHIP" = 1 ]; then
         # on Wi-Fi and Ethernet in the same LAN avahi hears itself and renames the
         # box <name>-2.local; on Ethernet alone a restart gives it its name back
         systemctl restart avahi-daemon
-        # Imager'"'"'s cloud-init seed holds the bench Wi-Fi password and the
-        # Imager user'"'"'s password hash: wired DHCP only, nothing else
-        if [ -f /boot/firmware/network-config ]; then
-            printf "%s\n" "network:" "  version: 2" "  ethernets:" "    eth0:" "      dhcp4: true" "      optional: true" >/boot/firmware/network-config
-        fi
-        if [ -f /boot/firmware/user-data ]; then
-            printf "%s\n" "#cloud-config" "# cleared by hapi-build.sh --ship; cloud-init is disabled on this box" >/boot/firmware/user-data
-        fi
-        [ -d /etc/cloud ] && touch /etc/cloud/cloud-init.disabled
-        echo "bench gateway choice and forward cleared; Imager seed scrubbed"' </dev/null
+        echo "bench gateway choice and forward cleared"' </dev/null
     reg_build "$DEV" ship "$(model_os)" "$(reg_hostkey "pivpn@$PI")" "$(reg_vpncert "$(reg_field "$DEV" 3)")" "$CODE"
     reg_push
 else
@@ -139,13 +133,13 @@ else
     trap 'rm -rf "$payload"' EXIT
     cp "$HERE"/pi/hapi-* "$HERE"/pi/hapi.sudoers "$payload/"
     printf '%s\n%s\n' "$keys" "$prodkey" >"$payload/authorized_keys"
-    tar -C "$payload" -cf - . | ssh "${SSHOPT[@]}" "$LOGIN@$PI" 'rm -rf /tmp/hapi-build && mkdir -m 700 /tmp/hapi-build && tar -C /tmp/hapi-build -xf -'
+    tar -C "$payload" -cf - . | ssh "${PIOPT[@]}" "$LOGIN@$PI" 'rm -rf /tmp/hapi-build && mkdir -m 700 /tmp/hapi-build && tar -C /tmp/hapi-build -xf -'
 
     # sudo on the Pi: passwordless (older Imager images), else pivpn's password
     # from the register (a re-run) or the Imager user's password (a fresh image:
     # SSHPASS, or asked for)
     sudopw=""
-    if ! ssh "${SSHOPT[@]}" "$LOGIN@$PI" 'sudo -n true' 2>/dev/null; then
+    if ! ssh "${PIOPT[@]}" "$LOGIN@$PI" 'sudo -n true' 2>/dev/null; then
         if [ "$LOGIN" = pivpn ] && [ -n "$(reg_field "$DEV" 6)" ]; then
             sudopw=$(reg_field "$DEV" 6)
         elif [ -n "${SSHPASS:-}" ]; then
@@ -183,7 +177,7 @@ nopw=$(as_root pivpn "$PW" 'ls /etc/sudoers.d/010_pi-nopasswd 2>/dev/null
     grep -l NOPASSWD /etc/sudoers.d/* | grep -vx /etc/sudoers.d/hapi; true' </dev/null)
 [ -z "$nopw" ] || echo "PROBLEM: passwordless sudo from $(echo $nopw)"
 # the rest as pivpn in a fresh session
-ssh "${SSHOPT[@]}" "pivpn@$PI" '
+ssh "${PIOPT[@]}" "pivpn@$PI" '
     bad=0
     sudo -k; sudo -n true 2>/dev/null && { echo "PROBLEM: sudo works without the password"; bad=1; }
     sudo -n /usr/local/sbin/hapi-agent status >/dev/null || { echo "PROBLEM: passwordless hapi-agent not allowed"; bad=1; }
