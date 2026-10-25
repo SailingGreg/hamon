@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # pivpn-add <name> <tunnel-ip> [site-lan-map e.g. 10.100.11.0]
+#   (RENEW=1: renew an existing certificate first - the old one stays valid
+#   until `easyrsa revoke-renewed <name>`)
 # Issues a client cert + per-client tls-crypt-v2 key, writes ccd/<name> (fixed
 # tunnel IP, optional iroute for the site's NETMAP'd LAN) and an inline
 # clients/<name>.ovpn for the Pi.  Re-running refreshes ccd and the .ovpn only.
@@ -8,6 +10,17 @@ NAME=$1 IP=$2 MAP=${3:-}
 cd /etc/pivpn
 export EASYRSA_PKI=/etc/pivpn/pki EASYRSA_BATCH=1 \
        EASYRSA_ALGO=ec EASYRSA_CURVE=prime256v1 EASYRSA_DIGEST=sha256
+# client certificates run to the CA's expiry, at most 10 years (revoke to end
+# one early); easy-rsa's default is 825 days. EASYRSA_CERT_EXPIRE overrides
+if [ -z "${EASYRSA_CERT_EXPIRE:-}" ]; then
+  ca_end=$(date -u -D "%b %d %H:%M:%S %Y GMT" -d "$(openssl x509 -noout -enddate -in pki/ca.crt | cut -d= -f2)" +%s)
+  days=$(( (ca_end - $(date +%s)) / 86400 - 1 ))
+  [ "$days" -le 3650 ] || days=3650
+  export EASYRSA_CERT_EXPIRE=$days
+fi
+if [ -f "pki/issued/$NAME.crt" ] && [ "${RENEW:-}" = 1 ]; then
+  /usr/share/easy-rsa/easyrsa renew "$NAME"
+fi
 [ -f "pki/issued/$NAME.crt" ] || /usr/share/easy-rsa/easyrsa build-client-full "$NAME" nopass
 [ -f "clients/$NAME.tc2" ] || openvpn --tls-crypt-v2 tc2-server.key --genkey tls-crypt-v2-client "clients/$NAME.tc2"
 { echo "ifconfig-push $IP 255.255.0.0"; [ -n "$MAP" ] && echo "iroute $MAP 255.255.255.0"; true; } > "ccd/$NAME"

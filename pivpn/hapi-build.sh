@@ -38,7 +38,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HAMON="$(dirname "$HERE")"
 REGISTER="${REGISTER:-$HAMON/docs/hapi-devices.md}"
 PROD="${PROD:-greg@home.monitor-software.com}"
-SSHOPT=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
+# one shared connection per host for the whole run (ControlMaster): these
+# scripts make many short ssh calls, and a burst of new connections can be dropped
+SSHOPT=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new
+        -o ControlMaster=auto -o "ControlPath=$HOME/.ssh/cm-hapi-%C" -o ControlPersist=60)
 
 LOGIN=pivpn NEWSECRETS=0 SHIP=0
 while [ "$#" -gt 0 ]; do
@@ -67,7 +70,7 @@ as_root() {   # as_root <user> <password-or-empty> <command> ; rest of stdin fol
     if [ -z "$pw" ]; then
         ssh "${SSHOPT[@]}" "$user@$PI" "sudo -n bash -c $(printf %q "$cmd")"
     else
-        { printf '%s\n' "$pw"; cat; } | ssh "${SSHOPT[@]}" "$user@$PI" "sudo -S -p '' bash -c $(printf %q "$cmd")"
+        { printf '%s\n' "$pw"; cat; } | ssh "${SSHOPT[@]}" "$user@$PI" "sudo -k -S -p '' bash -c $(printf %q "$cmd")"
     fi
 }
 
@@ -195,5 +198,6 @@ ssh "${SSHOPT[@]}" "pivpn@$PI" '
     exit $bad' && [ -z "$nopw" ]
 
 echo
+"$HERE/hapi-label.sh" "$DEV" || echo "(no label image: see hapi-label.sh)"
 echo "label:  $DEV    setup code: $CODE"
 [ "$SHIP" = 1 ] && echo "ready to ship" || echo "next:   ./hapi-assign.sh $PI <site>"
