@@ -19,7 +19,7 @@ case "${1:-}" in
 esac
 name=$1
 [[ $name =~ ^[a-z0-9][a-z0-9_.-]*$ ]] || { echo "names are lower-case letters, digits, _ . -" >&2; exit 2; }
-pw=$(grep -E '^[a-z]{4,7}$' /usr/share/dict/words 2>/dev/null | shuf -n 3 --random-source=/dev/urandom | paste -sd- -)
+pw=$(grep -E '^[a-z]{4,7}$' /usr/share/dict/words 2>/dev/null | shuf -n 3 --random-source=/dev/urandom | paste -sd- -) || pw=""
 [ -n "$pw" ] || pw=$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)
 line="$name:$(openssl passwd -apr1 "$pw")"
 tmp=$(mktemp)
