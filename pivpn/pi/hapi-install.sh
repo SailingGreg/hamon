@@ -13,6 +13,13 @@
 # run again: it updates the files and settings and keeps agent.conf, the
 # gateway state and an installed VPN profile (pivpn/hapi-assign.sh adds that).
 #
+# HAPI_IMAGE=1: building the HAMON image (pivpn/hapi-image.sh, in a chroot of
+# the image): no stdin, nothing that needs a running system or a box's
+# identity. pivpn gets no password (locked) and a temporary passwordless sudo
+# (/etc/sudoers.d/hapi-adopt) until a box is adopted by hapi-build.sh, which
+# runs this again normally; the setup page is installed but only enabled then,
+# when the box has a setup code.
+#
 # It doesn't remove Raspberry Pi Imager's passwordless sudo
 # (/etc/sudoers.d/010_pi-nopasswd) - hapi-build.sh does that last, once it has
 # checked that pivpn can log in and use sudo with the password.
@@ -22,9 +29,14 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 [ "$(id -u)" = 0 ] || { echo "hapi-install: run as root" >&2; exit 1; }
-IFS= read -r PW || true
-IFS= read -r CODE || true
-[ -n "${PW:-}" ] && [ -n "${CODE:-}" ] || { echo "hapi-install: the password and setup code go on stdin" >&2; exit 1; }
+IMAGE=${HAPI_IMAGE:-0}
+live() { [ "$IMAGE" != 1 ]; }   # a running box, not the image build
+PW="" CODE=""
+if live; then
+    IFS= read -r PW || true
+    IFS= read -r CODE || true
+    [ -n "${PW:-}" ] && [ -n "${CODE:-}" ] || { echo "hapi-install: the password and setup code go on stdin" >&2; exit 1; }
+fi
 for f in hapi-hostname.sh hapi-hostname.service hapi-vpn-swap.sh hapi-agent.py hapi-agent.service hapi-agent.timer \
          hapi-agent.conf.example hapi-setup.py hapi-setup.service hapi.sudoers authorized_keys; do
     [ -f "$f" ] || { echo "hapi-install: $f missing" >&2; exit 1; }
@@ -45,9 +57,9 @@ apt-get -qq -y --no-upgrade install openvpn iptables-persistent conntrack fake-h
 step "hostname (hapi-<eth0 MAC>)"
 install -m 755 hapi-hostname.sh /usr/local/sbin/
 install -m 644 hapi-hostname.service /etc/systemd/system/
-systemctl daemon-reload
+live && systemctl daemon-reload
 systemctl enable -q hapi-hostname
-/usr/local/sbin/hapi-hostname.sh
+live && /usr/local/sbin/hapi-hostname.sh
 
 step "clock (no RTC: fake-hwclock keeps it past the certificate start dates if NTP is blocked)"
 # Trixie splits it into -load/-save (the old fake-hwclock.service is masked there)
@@ -75,7 +87,16 @@ EOF
 step "users: pivpn (ssh keys, sudo with the password), hapi (setup page)"
 id pivpn >/dev/null 2>&1 || useradd -m -s /bin/bash pivpn
 usermod -aG sudo pivpn
-echo "pivpn:$PW" | chpasswd
+if live; then
+    echo "pivpn:$PW" | chpasswd
+else
+    # the image: no password; passwordless sudo only until adoption, and only
+    # our keys can log in (hapi-build.sh removes this, and fails while it exists)
+    passwd -q -l pivpn
+    echo "pivpn ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/hapi-adopt
+    chmod 440 /etc/sudoers.d/hapi-adopt
+    visudo -qcf /etc/sudoers.d/hapi-adopt
+fi
 install -d -m 700 -o pivpn -g pivpn ~pivpn/.ssh
 install -m 600 -o pivpn -g pivpn authorized_keys ~pivpn/.ssh/authorized_keys
 id hapi >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin hapi
@@ -87,8 +108,12 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no
 EOF
-sshd -t
-systemctl reload ssh
+if live; then
+    sshd -t
+    systemctl reload ssh
+else
+    systemctl enable -q ssh   # off by default in Raspberry Pi OS
+fi
 
 step "hapi-agent (gateway discovery and the KNX forward)"
 install -m 755 hapi-agent.py /usr/local/sbin/hapi-agent
@@ -101,9 +126,11 @@ chmod 640 /etc/hapi/agent.conf
 step "setup page (http://<hostname>.local/, admin + the setup code)"
 install -m 755 hapi-setup.py /usr/local/sbin/hapi-setup
 install -m 644 hapi-setup.service /etc/systemd/system/
-printf '%s\n' "$CODE" >/etc/hapi/setup-code
-chown root:hapi /etc/hapi/setup-code
-chmod 640 /etc/hapi/setup-code
+if live; then
+    printf '%s\n' "$CODE" >/etc/hapi/setup-code
+    chown root:hapi /etc/hapi/setup-code
+    chmod 640 /etc/hapi/setup-code
+fi
 visudo -qcf hapi.sudoers
 install -m 440 hapi.sudoers /etc/sudoers.d/hapi
 
@@ -129,9 +156,14 @@ install -m 755 hapi-vpn-swap.sh /usr/local/sbin/hapi-vpn-swap
 
 step "IP forwarding"
 echo net.ipv4.ip_forward=1 >/etc/sysctl.d/90-pivpn.conf
-sysctl -q --system
+live && sysctl -q --system
 
 step services
+if ! live; then
+    systemctl enable -q hapi-agent.timer
+    echo "hapi-install: image done (setup page enabled at adoption)"
+    exit 0
+fi
 systemctl daemon-reload
 systemctl enable -q --now hapi-agent.timer
 systemctl enable -q hapi-setup
