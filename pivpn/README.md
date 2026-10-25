@@ -52,6 +52,14 @@ OS Lite 64-bit (Bookworm or Trixie; a Pi 3B+ or later) and a network.
    re-checks the lock-down. Run it via the Pi's Ethernet address, not its Wi-Fi one. Print
    the label.
 
+**Device register** (`docs/hapi-devices.md`: local only, mode 600, copied to prod's
+`~/pivpn/hapi-devices.md` by the scripts; it holds secrets). The device table has one row per
+Pi with its current state, password and setup code; the **Builds** table gets a row from every
+`hapi-build`, `hapi-assign` and `--ship` run: date, device, step, hamon commit, model and OS,
+the Pi's ssh host key fingerprint (ED25519; compare with what ssh shows on first connection),
+the VPN client certificate (name, serial, expiry: renew before it, see below) and the setup
+code. Code: `hapi-register.sh`.
+
 The box name identifies the hardware; the VPN client name is the site (e.g. site X uses
 hapi-1a2b3c). In hamon-upload set the site's address to `10.86.0.N`, port `3671`, and keep
 the old address noted as the fallback.
