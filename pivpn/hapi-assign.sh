@@ -29,7 +29,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HAMON="$(dirname "$HERE")"
 REGISTER="${REGISTER:-$HAMON/docs/hapi-devices.md}"
 PROD="${PROD:-greg@home.monitor-software.com}"
-SSHOPT=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
+# one shared connection per host for the whole run (ControlMaster): these
+# scripts make many short ssh calls, and a burst of new connections can be dropped
+SSHOPT=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new
+        -o ControlMaster=auto -o "ControlPath=$HOME/.ssh/cm-hapi-%C" -o ControlPersist=60)
 
 WANT="" RENEW=0
 while [ "$#" -gt 2 ]; do
@@ -91,9 +94,12 @@ EOF
 echo "$SITE: tunnel address $IP"
 
 # --- the Pi: profile in, VPN on ----------------------------------------------
+# the server's log from now on shows the Pi's new connection (the status file
+# can still list the old one for up to 60 s)
+since=$(ssh "${SSHOPT[@]}" "$PROD" date -u +%Y-%m-%dT%H:%M:%SZ)
 { printf '%s\n' "$PW"; ssh "${SSHOPT[@]}" "$PROD" cat "pivpn/clients/$SITE.ovpn"; } |
-    ssh "${SSHOPT[@]}" "pivpn@$PI" "sudo -S -p '' sh -c 'umask 077; cat >/etc/openvpn/client/pivpn.conf.new &&
-        [ -s /etc/openvpn/client/pivpn.conf.new ] && mv /etc/openvpn/client/pivpn.conf.new /etc/openvpn/client/pivpn.conf &&
+    ssh "${SSHOPT[@]}" "pivpn@$PI" "sudo -k -S -p '' sh -c 'umask 077; cat >/etc/openvpn/client/pivpn.conf.new &&
+        [ \"\$(head -1 /etc/openvpn/client/pivpn.conf.new)\" = client ] && mv /etc/openvpn/client/pivpn.conf.new /etc/openvpn/client/pivpn.conf &&
         systemctl enable -q openvpn-client@pivpn && systemctl restart openvpn-client@pivpn'" ||
     die "installing the profile on the Pi failed"
 echo "$DEV: profile installed, VPN starting"
@@ -101,8 +107,8 @@ echo "$DEV: profile installed, VPN starting"
 # --- wait for it on the server ---------------------------------------------------
 for ((i = 0; i < 24; i++)); do
     sleep 5
-    if ssh "${SSHOPT[@]}" "$PROD" "docker exec pivpn-server cat /tmp/pivpn-status.log" 2>/dev/null |
-            grep -qE "^(CLIENT_LIST,)?$SITE,"; then
+    if ssh "${SSHOPT[@]}" "$PROD" "docker logs --since $since pivpn-server 2>&1" |
+            grep -q "\[$SITE\] Peer Connection Initiated"; then
         up=1; break
     fi
 done
