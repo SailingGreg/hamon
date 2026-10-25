@@ -109,6 +109,9 @@ if [ "$SHIP" = 1 ]; then
             nmcli -t -f NAME,TYPE connection show | awk -F: "\$2 ~ /wireless/ {print \$1}" |
                 while read -r c; do nmcli connection delete "$c" >/dev/null && echo "removed Wi-Fi profile $c"; done
         fi
+        # on Wi-Fi and Ethernet in the same LAN avahi hears itself and renames the
+        # box <name>-2.local; on Ethernet alone a restart gives it its name back
+        systemctl restart avahi-daemon
         # Imager'"'"'s cloud-init seed holds the bench Wi-Fi password and the
         # Imager user'"'"'s password hash: wired DHCP only, nothing else
         if [ -f /boot/firmware/network-config ]; then
