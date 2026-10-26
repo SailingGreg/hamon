@@ -73,8 +73,10 @@ for arg in "$@"; do
         echo "$(date '+%F %T') $c: tunnel not back after ${UP_WAIT} s - no hamon check"
     elif [ ! -p "$KPIPE" ]; then
         echo "$(date '+%F %T') $c: tunnel back after $((i + 1)) s; no $KPIPE - is ha-mon running?"
+    elif ! timeout 5 sh -c 'echo "check $1" > "$2"' _ "$site" "$KPIPE"; then
+        # a FIFO write blocks with no reader (ha-mon stopping or restarting)
+        echo "$(date '+%F %T') $c: tunnel back after $((i + 1)) s; kpipe not read - no hamon check"
     else
-        echo "check $site" > "$KPIPE"
         echo "$(date '+%F %T') $c: tunnel back after $((i + 1)) s - asked hamon to check $site"
     fi
 done
