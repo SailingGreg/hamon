@@ -5,7 +5,7 @@
  * Connection, so that is all this provides:
  *
  *   Connection({ ipAddr, ipPort, physAddr, suppress_ack_ldatareq, waitForTunnelingAck, loglevel, site, log,
- *                secure, dataSecure, handlers: { connected, event, error } })
+ *                secure, dataSecure, transport, handlers: { connected, event, error } })
  *   .state            'idle' while connected (what connection.js tests for)
  *   .conntime         set while connected (knx.Datapoint autoread checks it)
  *   .write(ga, value, dptid, cb) / .writeRaw(ga, buf, bitlength, cb) / .read(ga, cb) / .Disconnect()
@@ -17,7 +17,9 @@
  * KNXUltimate's dptlib) to decode; .write() encodes with KNXUltimate's dptlib
  * too, so a knxultimate site never loads the knx package.
  *
- * Plain tunnelling over UDP, or with `secure` (from secrets.js) KNX Secure
+ * Plain tunnelling over UDP, or over TCP with `transport: 'tcp'` (a tunnelling
+ * v2 gateway: no TUNNELLING_ACKs, TCP itself resends, so a short VPN outage
+ * doesn't make the gateway close the tunnel), or with `secure` (from secrets.js) KNX Secure
  * tunnelling over TCP: tunnel user ID + password and the gateway's device
  * authentication code, given directly (no keyring). knxultimate only takes Data
  * Secure group keys from a keyring and resets them at every session start, so
@@ -179,7 +181,7 @@ class UltimateConnection extends EventEmitter {
         const options = this.options
         const secure = options.secure
         this.client = new KNXClient({
-            hostProtocol: secure ? 'TunnelTCP' : 'TunnelUDP',
+            hostProtocol: secure || options.transport === 'tcp' ? 'TunnelTCP' : 'TunnelUDP',
             ipAddr: options.ipAddr,
             ipPort: options.ipPort || 3671,
             physAddr: options.physAddr || '15.15.15',   // knx's default; secure: the gateway assigns it

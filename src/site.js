@@ -85,7 +85,7 @@ function buildEndpoint(Datapoint, ga, dpt, connection) {
 // location: the hamon.yml entry (plus path, influxver); opts: { stack,
 // connectedBefore, failures, survey, precheck, dedupe (ms, 0 = off) }; hooks: see the top
 function createSite(location, opts, hooks) {
-    const { dns, port, config, name, path, influxver, logging, device, phyAddr, secure } = location
+    const { dns, port, config, name, path, influxver, logging, device, phyAddr, secure, transport } = location
     // everything this site logs goes through its own logger (see logger.js)
     const log = logger.siteLogger(name)
     const siteStack = opts.stack || location.stack
@@ -93,6 +93,9 @@ function createSite(location, opts, hooks) {
     // the stack picks the decoder too: knx decodes/encodes with knx.Datapoint,
     // knxultimate with datapoint.js (KNXUltimate's dptlib), see knxstack.js
     const decoder = siteStack === 'knxultimate' ? 'knxultimate' : 'knx'
+    // `transport: tcp`: tunnelling over TCP, for a gateway with tunnelling v2
+    // (knxdesc shows tunnelv2); knx 2.4.1 only does UDP, so knxultimate only
+    const tcp = String(transport || '').toLowerCase() === 'tcp' && siteStack === 'knxultimate'
     const Datapoint = knx.Datapoint
     // once a never-connected site has given up, its restarts keep the stack
     // quiet - otherwise it logs 'connection timed out, retrying...' every few
@@ -317,6 +320,7 @@ function createSite(location, opts, hooks) {
             site: name,             // knxultimate only: labels the library's own lines
             log,                    // knxultimate only: the shim's lines
             secure: secureTunnel,   // knxultimate only; undefined = plain tunnelling
+            transport: tcp ? 'tcp' : undefined,   // knxultimate only: tunnel over TCP (KNXnet/IP tunnelling v2)
             dataSecure,             // knxultimate only: group keys for a plain tunnel
             loglevel: quietRetries ? 'error' : logging,
             handlers: {
@@ -409,7 +413,8 @@ function createSite(location, opts, hooks) {
             // unresolved below
         }
         if (finished) return // stopped while resolving
-        log.info('KNXnet/IP %s -> %s (stack %s, decoder %s%s%s)', dns, knxAddr, siteStack || 'knx', decoder,
+        log.info('KNXnet/IP %s -> %s (stack %s, decoder %s%s%s%s)', dns, knxAddr, siteStack || 'knx', decoder,
+                    tcp ? ', tcp' : '',
                     dedupe ? `, dedupe ${opts.dedupe / 1000}s` : '',
                     opts.precheck === true ? ', checking the gateway answers first' : '')
         // unresolved: knx would silently fall back to the multicast default and

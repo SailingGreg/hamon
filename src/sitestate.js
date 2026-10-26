@@ -24,14 +24,20 @@ const fs = require('fs')
 // the hamon.yml fields that make a site restart when they change (service.js
 // compareLoc), and that a block is tied to
 const CHANGE_FIELDS = ['enabled', 'dns', 'port', 'device', 'logging', 'phyAddr',
-                       'config', 'secure', 'tunnelIA']
+                       'config', 'secure', 'tunnelIA', 'transport']
+// fields added since blocks were first stored: in the fingerprint only when
+// set, so the fingerprints of sites without them (and their blocks) don't change
+const LATER_FIELDS = new Set(['transport'])
 
 // identifies the config a site was blocked with: its fields, the stack it runs
 // on and the GA file's mtime. A block carries over a restart only while this
 // is unchanged
 function fingerprint(loc, stack, mtime) {
     const f = {}
-    for (const k of CHANGE_FIELDS) f[k] = loc[k] == null ? null : String(loc[k])
+    for (const k of CHANGE_FIELDS) {
+        if (loc[k] == null && LATER_FIELDS.has(k)) continue
+        f[k] = loc[k] == null ? null : String(loc[k])
+    }
     f.stack = stack
     f.mtime = mtime == null ? null : mtime
     return JSON.stringify(f)
