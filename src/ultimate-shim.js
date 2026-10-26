@@ -184,6 +184,10 @@ class UltimateConnection extends EventEmitter {
             physAddr: options.physAddr || '15.15.15',   // knx's default; secure: the gateway assigns it
             localIPAddress,
             suppress_ack_ldatareq: !!options.suppress_ack_ldatareq,
+            // wait for the gateway's TUNNELLING_ACK and repeat once if it doesn't
+            // come (ISO 22510 5.4.2.6) - with suppress_ack_ldatareq too, where
+            // knxultimate < 6.3 sent once and never waited (#106)
+            waitForTunnelingAck: true,
             loglevel: '',   // not process-wide: set on this client below
             setPrefix: options.site || 'KNXEngine',   // labels the library's lines
             autoReconnect: true,   // knx's FSM reconnects by itself too
