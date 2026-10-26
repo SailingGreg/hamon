@@ -6,16 +6,15 @@
  *   knxultimate  KNXUltimate for the transport (UDP now; TCP / KNX Secure later),
  *                presented through the same Connection API by ultimate-shim.js
  *
- * Either way the caller gets { Connection, Datapoint } with knx's Datapoint;
- * connection.js swaps in datapoint.js (KNXUltimate's dptlib) for knxultimate
- * sites, so the stack picks the decoder too. Type names and units come from
- * dptnames.json, so the Influx data is the same either way.
+ * Either way the caller gets { Connection, Datapoint }: knx's own, or the shim
+ * and datapoint.js (KNXUltimate's dptlib), so the stack picks the decoder too
+ * and a knxultimate site never loads the knx package. Type names and units come
+ * from dptnames.json, so the Influx data is the same either way.
  */
 
 module.exports = function (stack) {
-    const knx = require('knx')
     if (stack == null || stack === '' || stack === 'knx') {
-        return knx
+        return require('knx')
     }
     if (stack === 'knxultimate') {
         // required here, not at the top: sites on the default stack don't need
@@ -27,7 +26,7 @@ module.exports = function (stack) {
             throw new Error(`stack knxultimate: package not installed (needs Node >= 18, this is ${process.version})`)
         }
         const { Connection } = require('./ultimate-shim')
-        return { Connection, Datapoint: knx.Datapoint }
+        return { Connection, Datapoint: require('./datapoint').Datapoint }
     }
     throw new Error(`unknown knx stack '${stack}' (use knx or knxultimate)`)
 }

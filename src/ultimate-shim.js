@@ -4,7 +4,7 @@
  * connection.js, mqwrite.js and knx.Datapoint only use a small part of a knx
  * Connection, so that is all this provides:
  *
- *   Connection({ ipAddr, ipPort, physAddr, suppress_ack_ldatareq, loglevel, site, log,
+ *   Connection({ ipAddr, ipPort, physAddr, suppress_ack_ldatareq, waitForTunnelingAck, loglevel, site, log,
  *                secure, dataSecure, handlers: { connected, event, error } })
  *   .state            'idle' while connected (what connection.js tests for)
  *   .conntime         set while connected (knx.Datapoint autoread checks it)
@@ -13,8 +13,9 @@
  *                     same four the knx FSM emits, in the same order:
  *                     event_<dest>, <evt>_<dest>, <evt>, event
  *
- * Telegram payloads are passed on raw, so knx.Datapoint decodes them with knx's
- * own dptlib exactly as before, and writes are encoded with the same dptlib.
+ * Telegram payloads are passed on raw, for the site's Datapoint (datapoint.js,
+ * KNXUltimate's dptlib) to decode; .write() encodes with KNXUltimate's dptlib
+ * too, so a knxultimate site never loads the knx package.
  *
  * Plain tunnelling over UDP, or with `secure` (from secrets.js) KNX Secure
  * tunnelling over TCP: tunnel user ID + password and the gateway's device
@@ -51,7 +52,7 @@ const { EventEmitter } = require('events')
 const dgram = require('dgram')
 const { AsyncLocalStorage } = require('async_hooks')
 const { isMainThread } = require('worker_threads')
-const DPTLib = require('knx/src/dptlib')
+const DPTLib = require('knxultimate/build/dptlib')
 const logger = require('./logger')
 const { DataSecure, isSecured } = require('./datasecure')
 
@@ -184,10 +185,8 @@ class UltimateConnection extends EventEmitter {
             physAddr: options.physAddr || '15.15.15',   // knx's default; secure: the gateway assigns it
             localIPAddress,
             suppress_ack_ldatareq: !!options.suppress_ack_ldatareq,
-            // wait for the gateway's TUNNELLING_ACK and repeat once if it doesn't
-            // come (ISO 22510 5.4.2.6) - with suppress_ack_ldatareq too, where
-            // knxultimate < 6.3 sent once and never waited (#106)
-            waitForTunnelingAck: true,
+            // set by site.js from the device type; left out, the library's default
+            ...(options.waitForTunnelingAck != null ? { waitForTunnelingAck: !!options.waitForTunnelingAck } : {}),
             loglevel: '',   // not process-wide: set on this client below
             setPrefix: options.site || 'KNXEngine',   // labels the library's lines
             autoReconnect: true,   // knx's FSM reconnects by itself too
@@ -360,7 +359,7 @@ class UltimateConnection extends EventEmitter {
         if (grpaddr == null || value == null || !this.client) return
         try {
             const apdu = {}
-            DPTLib.populateAPDU(value, apdu, dptid)   // knx's encoding, not knxultimate's
+            DPTLib.populateAPDU(value, apdu, dptid)
             this.client.writeRaw(grpaddr, apdu.data, apdu.bitlength)
         } catch (err) {
             return this.dropped('write', grpaddr, err)
