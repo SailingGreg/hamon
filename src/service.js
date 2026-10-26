@@ -44,7 +44,7 @@ function setThreads(doc) {
 }
 
 // a site in this thread, looking like a Worker to the rest of this file:
-// 'message', 'error' and 'exit' events, and postMessage({ exit: true })
+// 'message', 'error' and 'exit' events, and postMessage({ exit: true } or { check: true })
 class InlineWorker extends EventEmitter {
     constructor(loc, data) {
         super()
@@ -63,6 +63,7 @@ class InlineWorker extends EventEmitter {
     }
     postMessage(msg) {
         if (msg && msg.exit) this.site.stop().then(() => this.done())
+        else if (msg && msg.check) this.site.check()
     }
     done() {
         if (this.exited) return
@@ -545,32 +546,47 @@ async function runService(path, hamonConfig) {
         }
         const pipe = new net.Socket({ fd });
         // Now `pipe` is a stream that can be used for reading from the FIFO.
-        pipe.on('data', (data) => { // process data ...
-            let ksite = data.toString();
-            if (ksite.length > 1) {
-                ksite = ksite.slice(0, -1); // remove the NL
-                logger.info(`Looking to restart ${ksite}`);
-                // we can call restart(site) but need to terminate first
-                let oldLoc = findLoc(ksite, originalDoc);
-                if (oldLoc != null && (oldLoc["enabled"] == true)) {
-                    let wrk = oldLoc["worker"];
-                    //console.log("wrk is null? ", wrk == null);
-                    if (wrk != null && wrk !== "") {
-                        logger.info("Terminating existing worker");
-                        wrk.postMessage({ exit: true });
-                    }
-                    // and now restart - immediately, overriding any back-off
-                    // wait (the failure count is kept). This is also how a
-                    // blocked site is re-checked, which may have no worker
-                    // (blocked at the last start)
-                    cancelPending(ksite);
-                    restart(ksite);
-                } else {
-                    logger.info(`Can't find location ${ksite}`);
-                }
-            }
+        // one command per line: "<site>" restarts it, "check <site>" asks the
+        // site to check its tunnel now (utils/vpn-reconnect.sh)
+        pipe.on('data', (data) => {
+            for (const line of data.toString().split('\n')) kpipeCommand(line.trim());
         });
     });
+
+    function kpipeCommand(ksite) {
+        if (ksite.length < 1) return;
+        const check = /^check\s+(\S+)$/.exec(ksite);
+        if (check) {
+            const loc = findLoc(check[1], originalDoc);
+            const wrk = loc != null ? loc["worker"] : null;
+            if (wrk != null && wrk !== "") {
+                logger.info(`Check requested for ${check[1]}`);
+                wrk.postMessage({ check: true });
+            } else {
+                logger.info(`Check: ${check[1]} has no running site`);
+            }
+            return;
+        }
+        logger.info(`Looking to restart ${ksite}`);
+        // we can call restart(site) but need to terminate first
+        let oldLoc = findLoc(ksite, originalDoc);
+        if (oldLoc != null && (oldLoc["enabled"] == true)) {
+            let wrk = oldLoc["worker"];
+            //console.log("wrk is null? ", wrk == null);
+            if (wrk != null && wrk !== "") {
+                logger.info("Terminating existing worker");
+                wrk.postMessage({ exit: true });
+            }
+            // and now restart - immediately, overriding any back-off
+            // wait (the failure count is kept). This is also how a
+            // blocked site is re-checked, which may have no worker
+            // (blocked at the last start)
+            cancelPending(ksite);
+            restart(ksite);
+        } else {
+            logger.info(`Can't find location ${ksite}`);
+        }
+    }
 
   // reload so changes available
   function reload() {

@@ -399,6 +399,24 @@ class UltimateConnection extends EventEmitter {
             this.state, (err && err.message) || err)
     }
 
+    // send a CONNECTIONSTATE_REQUEST now instead of at the next 60 s heartbeat:
+    // after a planned VPN reconnect the gateway may have dropped our channel
+    // ("Invalid Connection ID"), and the library then reconnects at once
+    // rather than up to a minute later. runHeartbeat is the library's own
+    // (private) heartbeat step, which also restarts the 60 s cycle.
+    // Returns why it didn't, or undefined
+    checkNow() {
+        const client = this.client
+        if (!client || this.closing) return 'no client'
+        if (!client.isConnected()) return 'not connected'
+        if (typeof client.runHeartbeat !== 'function') return 'knxultimate internals changed (no runHeartbeat)'
+        try {
+            client.runHeartbeat()
+        } catch (err) {
+            return (err && err.message) || String(err)
+        }
+    }
+
     // state stays as it is until the library confirms, as with knx: connection.js
     // checks for 'idle' after calling this to decide whether to wait for
     // 'disconnected' (and so for the DISCONNECT_REQUEST to go out) before exiting.
