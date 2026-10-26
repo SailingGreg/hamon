@@ -7,7 +7,7 @@
     "influxdb-v2": "^1.0.0",
     "js-yaml": "^4.1.0",
     "knx": "2.4.1",
-    "knxultimate": "6.2.1",
+    "knxultimate": "6.3.0",
     "mqtt": "^4.2.6",
     "patch-package": "^8.0.0",
     "sax": "^1.2.4",

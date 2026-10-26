@@ -91,9 +91,9 @@ function createSite(location, opts, hooks) {
     const siteStack = opts.stack || location.stack
     const knx = knxstack(siteStack)
     // the stack picks the decoder too: knx decodes/encodes with knx.Datapoint,
-    // knxultimate with datapoint.js (KNXUltimate's dptlib)
+    // knxultimate with datapoint.js (KNXUltimate's dptlib), see knxstack.js
     const decoder = siteStack === 'knxultimate' ? 'knxultimate' : 'knx'
-    const Datapoint = decoder === 'knxultimate' ? require('./datapoint').Datapoint : knx.Datapoint
+    const Datapoint = knx.Datapoint
     // once a never-connected site has given up, its restarts keep the stack
     // quiet - otherwise it logs 'connection timed out, retrying...' every few
     // seconds each time
@@ -307,6 +307,12 @@ function createSite(location, opts, hooks) {
             // these set based on device type
             forceTunneling: device == "generic" ? true : false,
             suppress_ack_ldatareq: (device == "loxone" || device == "eibport") ? true : false,
+            // knxultimate 6.3+: wait for the TUNNELLING_ACK and repeat once if it
+            // doesn't come (ISO 22510 5.4.2.6); two missed ACKs end the connection.
+            // eibport ACKs promptly, so it now waits too (before 6.3 a suppress_ack
+            // site sent once and never waited). A Loxone G1 is slow to accept a
+            // reconnect, so it keeps send-once rather than risk dropping the tunnel
+            waitForTunnelingAck: device == "loxone" ? false : true,
             physAddr: phyAddr,
             site: name,             // knxultimate only: labels the library's own lines
             log,                    // knxultimate only: the shim's lines
