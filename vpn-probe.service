@@ -1,0 +1,12 @@
+[Unit]
+Description=hamon VPN tunnel loss probe (utils/vpn-probe.sh)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=greg
+Group=greg
+WorkingDirectory=/home/greg/hamon
+ExecStart=/home/greg/hamon/utils/vpn-probe.sh
+Nice=5
