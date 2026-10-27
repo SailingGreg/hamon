@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the hamon VPN tunnel loss probe every 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=20
+AccuracySec=10s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
