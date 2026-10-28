@@ -1,0 +1,21 @@
+#!/bin/sh
+#
+# udhcpc.script - the tap interface's DHCP address from the site LAN, and only
+# that: no default route and no resolv.conf, so the VPN itself (via eth0) and
+# docker's DNS stay as they are. The KNX interface is on the same LAN, so the
+# interface's own subnet route is all the forward needs.
+
+case "$1" in
+    deconfig)
+        ip -4 addr flush dev "$interface"
+        ip link set "$interface" up
+        ;;
+    bound|renew)
+        if ! ip -4 addr show dev "$interface" | grep -q "inet $ip/$mask "; then
+            ip -4 addr flush dev "$interface"
+            ip -4 addr add "$ip/$mask" brd + dev "$interface"
+            echo "udhcpc: $interface $ip/$mask"
+        fi
+        ;;
+esac
+exit 0
