@@ -405,19 +405,23 @@ class UltimateConnection extends EventEmitter {
     // send a CONNECTIONSTATE_REQUEST now instead of at the next 60 s heartbeat:
     // after a planned VPN reconnect the gateway may have dropped our channel
     // ("Invalid Connection ID"), and the library then reconnects at once
-    // rather than up to a minute later. startHeartBeat is the library's own
-    // (private) heartbeat start: it stops the pending heartbeat timers, then
-    // sends the request and restarts the 60 s cycle. runHeartbeat did the same
-    // but replaced the pending timers with a 'Timer ... was already running'
-    // warning every time. No public call yet (asked for one).
+    // rather than up to a minute later. checkConnection (public since 6.3.1)
+    // sends the request and restarts the 60 s heartbeat cycle without the
+    // 'Timer ... was already running' warnings; before 6.3.1 the private
+    // startHeartBeat did the same, kept as a fallback.
     // Returns why it didn't, or undefined
     checkNow() {
         const client = this.client
         if (!client || this.closing) return 'no client'
         if (!client.isConnected()) return 'not connected'
-        if (typeof client.startHeartBeat !== 'function') return 'knxultimate internals changed (no startHeartBeat)'
         try {
-            client.startHeartBeat()
+            if (typeof client.checkConnection === 'function') {
+                if (!client.checkConnection()) return 'not sent (not connected or not tunnelling)'
+            } else if (typeof client.startHeartBeat === 'function') {
+                client.startHeartBeat()
+            } else {
+                return 'knxultimate has no checkConnection'
+            }
         } catch (err) {
             return (err && err.message) || String(err)
         }
