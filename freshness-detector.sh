@@ -224,24 +224,30 @@ fi
 declare -A NEW_ACT=() NEW_N=()   # only still-stale sites are carried forward
 
 # restart <loc> <age> as kapacitor/restart.sh did: docker restart for 172.*
-# container sites, then (all sites) a kpipe re-init of the hamon worker
+# container sites, then (all sites) a kpipe re-init of the hamon worker.
+# A container is restarted once per scan: sites sharing one (two sites over one
+# L2TP link) would otherwise restart it again while its VPN is still coming up.
+# Sets HOW (not echoed: a $(...) subshell would lose RESTARTED)
+declare -A RESTARTED=()
 restart_site() {
-  local loc="$1" age="$2" dns cont how
+  local loc="$1" age="$2" dns cont
   dns=$(yml_field "$loc" dns)
-  how="kpipe re-init"
+  HOW="kpipe re-init"
   if [[ "$dns" == 172.* ]]; then
     cont=$(container_for "$dns" "$loc")
     if [ -z "$cont" ]; then
-      how="NO CONTAINER at $dns -> kpipe re-init only"
+      HOW="NO CONTAINER at $dns -> kpipe re-init only"
+    elif [ -n "${RESTARTED[$cont]:-}" ]; then
+      HOW="$cont already restarted this scan (for ${RESTARTED[$cont]}) -> kpipe re-init only"
     else
-      how="docker restart $cont + kpipe re-init"
+      HOW="docker restart $cont + kpipe re-init"
+      RESTARTED["$cont"]="$loc"
       if [ "$DRYRUN" = 0 ]; then
         docker restart "$cont" >/dev/null 2>&1 && sleep 10   # let the vpn settle
       fi
     fi
   fi
   if [ "$DRYRUN" = 0 ]; then echo "$loc" > "$KPIPE"; fi
-  echo "$how"
 }
 
 # ---- hamon.yml helpers (case-exact: Influx tag == yml name) ------------------
@@ -318,9 +324,9 @@ while IFS=, read -r loc ts; do
   fi
 
   n=$((n + 1)); acted=$((acted + 1))
-  how=$(restart_site "$loc" "$age")
-  log "STALE $loc ${age}m (>=${thresh}m) hamon: ${hs:-unknown} restart $n: $how"
-  slack "HAMON/$loc no data for ${age}m: $how (restart $n)"
+  restart_site "$loc" "$age"
+  log "STALE $loc ${age}m (>=${thresh}m) hamon: ${hs:-unknown} restart $n: $HOW"
+  slack "HAMON/$loc no data for ${age}m: $HOW (restart $n)"
   NEW_ACT["$loc"]="$now"; NEW_N["$loc"]="$n"
 done < <(freshness)
 
