@@ -16,8 +16,8 @@
 #     sites and restart-loop them; deadman only ever fired for groups it had
 #     actually seen, and this mirrors that.  WINDOW must stay >> THRESHOLD.
 #   * Container resolution is by IP, not by name.  Container names drifted from
-#     site names (e.g. site `fox` @ 172.18.0.15 is served by a container called
-#     `oldmarketrd`; `OPUS_AQUA` -> container `opusaqua`).  The hamon.yml `dns:`
+#     site names (e.g. site `site-a` @ 172.18.0.N is served by a container called
+#     `router-b`; `SITE_C` -> container `sitec`).  The hamon.yml `dns:`
 #     IP is the only reliable join.  Lowercase+strip-non-alnum name matching is
 #     a fallback for when no container holds the IP.
 #   * Thresholds live in a site-local file (THRESH_FILE), not hamon.yml:
@@ -117,7 +117,7 @@ slack() {  # only when acting: a dry run alongside kapacitor must not double-pos
 }
 
 # normalise a name the way the (intended) vpn convention does: lowercase, drop
-# any non-alphanumeric (so OPUS_AQUA -> opusaqua, bartonw_lc -> bartonwlc).
+# any non-alphanumeric (so SITE_C -> sitec, site_d -> sited).
 norm() { echo "$1" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9'; }
 
 # ---- wait for influxd -------------------------------------------------------
