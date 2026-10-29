@@ -1,0 +1,17 @@
+[Unit]
+Description=hamon uplink packet-loss probe (utils/netprobe.py)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=greg
+Group=greg
+WorkingDirectory=/home/greg/hamon
+ExecStart=/usr/bin/python3 /home/greg/hamon/utils/netprobe.py
+Restart=always
+RestartSec=10
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

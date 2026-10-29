@@ -8,6 +8,8 @@ yarn-error.log
 docs/
 # freshness-detector per-site thresholds: names sites, stays local
 freshness-thresholds.conf
+# netprobe targets: names site gateways, stays local
+netprobe.targets
 # freshness-detector secrets (SLACK_WEBHOOK)
 .freshness.env
 # per-site VPN launchers/configs on the servers (site names, PSKs) - never commit
