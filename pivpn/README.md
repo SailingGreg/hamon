@@ -57,6 +57,12 @@ OS Lite 64-bit (Bookworm or Trixie; a Pi 3B+ or later) and a network.
    prod to the Pi, starts the VPN, waits for the Pi on the server, runs `hapi-agent`
    through the tunnel and copies the register to prod. It prints the hamon-upload values:
    `dns 10.86.0.N`, port 3671.
+   **WireGuard beside OpenVPN** (optional): `./hapi-wg.sh <ip>` gives the box 10.88.0.N
+   (the same N as its 10.86.0.N) on prod's `wg-central`. The box's own key is made by the
+   build and never leaves it; only its public key goes to prod. OpenVPN is untouched, so this
+   can't cut a box off. hamon then reaches the site on either address (`dns 10.88.0.N` or
+   `10.86.0.N`), and moving a site is a `dns` change. `--remove` revokes the link at once.
+   Safe to re-run. Works through prod on a box on site, like the other scripts.
 5. **Bench test** (optional, recommended): `./hapi-benchtest.sh <ip>` runs `pi/fake-gateway.py`
    on the dev Pi, has the Pi's agent choose it, then from prod connects a KNX tunnel to
    `10.86.0.N:3671` the way hamon does: proves prod → VPN → Pi → gateway. Needs UDP 3671
