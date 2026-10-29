@@ -167,6 +167,7 @@ check "ssh host keys present" "[ -z \"\$(ls $MNT/etc/ssh/ssh_host_* 2>/dev/null)
 check "machine-id is not 'uninitialized' (no first boot: no ssh host keys)" "[ \"\$(cat $MNT/etc/machine-id)\" = uninitialized ]"
 check "a setup code is set" "[ ! -e $MNT/etc/hapi/setup-code ]"
 check "a VPN profile is present" "[ -z \"\$(ls $MNT/etc/openvpn/client/ 2>/dev/null)\" ]"
+check "a WireGuard key or config is present (must be made per box)" "[ -z \"\$(sudo ls $MNT/etc/wireguard/ 2>/dev/null)\" ]"
 check "pivpn has a password" "sudo grep -q '^pivpn:!' $MNT/etc/shadow"
 check "hapi-adopt missing" "sudo test -f $MNT/etc/sudoers.d/hapi-adopt"
 check "pivpn's keys missing" "[ \"\$(sudo grep -c ssh- $MNT/home/pivpn/.ssh/authorized_keys)\" -ge 2 ]"

@@ -255,9 +255,12 @@ def render(csrf, searching=False):
     parts.append('<section class="card"><h2>Status <span class="pill %s">%s'
                  '</span></h2><dl>' % ("ok" if ok else "bad",
                                        "all good" if ok else "needs attention"))
+    links = [v for v in st.get("vpns") or [vpn] if v.get("server_reachable")]
     parts.append("<dt>Link to hamon</dt><dd>%s</dd>" % (
-        "connected (%s)" % esc(vpn.get("ip")) if vpn.get("server_reachable")
-        else "<b>not connected</b>"))
+        "connected (%s)" % ", ".join(
+            "%s%s" % (esc(v.get("ip")), {"wireguard": " WireGuard",
+                                         "openvpn": " OpenVPN"}.get(v.get("type"), ""))
+            for v in links) if links else "<b>not connected</b>"))
     lan = st.get("lan") or {}
     parts.append("<dt>This box</dt><dd>%s</dd>" % esc(lan.get("ip") or "-"))
     parts.append("<dt>Gateway in use</dt><dd>%s</dd>" % (

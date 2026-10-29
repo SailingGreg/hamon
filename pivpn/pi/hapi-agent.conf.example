@@ -8,8 +8,10 @@ gateway_ip =
 gateway_serial =
 gateway_mac =
 
-tun_if = tun0
-# VPN server address to ping; empty = the first address of tun_if's subnet
+# VPN interfaces to forward from (space-separated): OpenVPN tun0 and
+# WireGuard wg0; one that isn't there yet is fine (no rule change when it appears)
+tun_if = tun0 wg0
+# VPN server address to ping (first interface up); empty = found per interface
 vpn_server =
 search_timeout = 3
 

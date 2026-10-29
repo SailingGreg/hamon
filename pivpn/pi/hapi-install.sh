@@ -51,8 +51,8 @@ echo "iptables-persistent iptables-persistent/autosave_v6 boolean false" | debco
 apt-get -qq update
 # --no-upgrade: on a deployed Pi (re-run over the VPN) an openvpn upgrade
 # would restart the tunnel under us; unattended-upgrades does upgrades
-apt-get -qq -y --no-upgrade install openvpn iptables-persistent conntrack fake-hwclock unattended-upgrades \
-    avahi-daemon python3 openssl >/dev/null
+apt-get -qq -y --no-upgrade install openvpn wireguard-tools iptables-persistent conntrack fake-hwclock \
+    unattended-upgrades avahi-daemon python3 openssl >/dev/null
 
 step "hostname (hapi-<eth0 MAC>)"
 install -m 755 hapi-hostname.sh /usr/local/sbin/
@@ -123,6 +123,8 @@ install -m 755 hapi-agent.py /usr/local/sbin/hapi-agent
 install -m 644 hapi-agent.service hapi-agent.timer /etc/systemd/system/
 install -d -m 755 /etc/hapi /var/lib/hapi
 [ -f /etc/hapi/agent.conf ] || install -m 640 hapi-agent.conf.example /etc/hapi/agent.conf
+# boxes built before WireGuard have the old default written out: forward from wg0 too
+sed -i 's/^tun_if = tun0$/tun_if = tun0 wg0/' /etc/hapi/agent.conf
 chown root:hapi /etc/hapi/agent.conf
 chmod 640 /etc/hapi/agent.conf
 
@@ -162,6 +164,15 @@ install -m 755 hapi-enrol.py /usr/local/sbin/hapi-enrol
 install -m 644 hapi-enrol.service hapi-enrol.timer /etc/systemd/system/
 # the standard route gets its profile from hapi-assign: the timer stays off there
 
+step "WireGuard key (the box's own; only its public key is ever sent)"
+# made on the box itself, never in the image: every box needs its own.
+# wg0.conf (server, address) comes from pivpn/hapi-assign.sh --wg or enrolment
+install -d -m 700 /etc/wireguard
+if live; then
+    [ -s /etc/wireguard/wg0.key ] || (umask 077; wg genkey >/etc/wireguard/wg0.key)
+    echo "   public key: $(wg pubkey </etc/wireguard/wg0.key)"
+fi
+
 step "IP forwarding"
 echo net.ipv4.ip_forward=1 >/etc/sysctl.d/90-pivpn.conf
 live && sysctl -q --system
@@ -180,6 +191,10 @@ if [ -f /etc/openvpn/client/pivpn.conf ]; then
     systemctl enable -q --now openvpn-client@pivpn
 else
     echo "   no VPN profile yet (/etc/openvpn/client/pivpn.conf): pivpn/hapi-assign.sh adds it"
+fi
+# WireGuard beside OpenVPN, once the box has its config (hapi-assign.sh --wg)
+if [ -f /etc/wireguard/wg0.conf ]; then
+    systemctl enable -q --now wg-quick@wg0
 fi
 
 echo "hapi-install: done on $(hostname)"

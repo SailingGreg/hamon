@@ -3,8 +3,9 @@
 # hapi-agent.py  -  KNX gateway discovery, forwarding and self-test for a site Pi.
 # Installed on the Pi as /usr/local/sbin/hapi-agent (the command used below).
 #
-# The Pi forwards <tunnel IP>:3671 to the site's KNX/IP gateway so hamon can
-# reach it over the VPN.  This finds the gateway itself (KNXnet/IP search on
+# The Pi forwards <tunnel IP>:3671 (UDP and TCP) to the site's KNX/IP gateway so
+# hamon can reach it over the VPN: OpenVPN (tun0) and/or WireGuard (wg0), each
+# with its own address and the same forward.  This finds the gateway itself (KNXnet/IP search on
 # 224.0.23.12:3671), keeps the forwarding rules pointing at it if its address
 # changes, and reports what it sees.  Python 3 standard library only.
 #
@@ -66,8 +67,9 @@ DEFAULTS = {
     "gateway_ip": "",
     "gateway_serial": "",
     "gateway_mac": "",
-    "tun_if": "tun0",
-    "vpn_server": "",           # empty = first address of tun_if's subnet
+    "tun_if": "tun0 wg0",       # VPN interfaces to forward from; absent ones are fine
+    "vpn_server": "",           # empty = found per interface (OpenVPN: first
+                                # address of its subnet; WireGuard: the peer)
     "search_timeout": "3",
     "mqtt_host": "",
     "mqtt_port": "1883",
@@ -265,15 +267,17 @@ def ensure_chain(chain, parent):
         sh("iptables", "-t", "nat", "-A", parent, "-j", chain)
 
 
-def apply_forward(gw_ip, tun_if):
-    """Point tun_if:3671 at the gateway; returns True when rules changed.
-    UDP for tunnelling v1, TCP for v2 (KNX IP gateways that offer TCP)."""
+def apply_forward(gw_ip, tun_ifs):
+    """Point each VPN interface's :3671 at the gateway; returns True when rules
+    changed. UDP for tunnelling v1, TCP for v2 (KNX IP gateways that offer TCP).
+    Rules are written for every configured interface, present or not, so one
+    coming up later (WireGuard added) doesn't change them."""
     lan_if = route_dev(gw_ip)
     want = {
         DNAT_CHAIN: ["-A %s -i %s -p %s -m %s --dport %d -j DNAT "
                      "--to-destination %s:%d"
                      % (DNAT_CHAIN, tun_if, p, p, KNX_PORT, gw_ip, KNX_PORT)
-                     for p in ("udp", "tcp")],
+                     for tun_if in tun_ifs for p in ("udp", "tcp")],
         SNAT_CHAIN: ["-A %s -d %s/32 -o %s -p %s -m %s --dport %d "
                      "-j MASQUERADE" % (SNAT_CHAIN, gw_ip, lan_if, p, p, KNX_PORT)
                      for p in ("udp", "tcp")],
@@ -340,6 +344,73 @@ def tun_server(ifname):
     """The VPN server is the first address of the tunnel subnet (topology subnet)."""
     addr = if_addr(ifname)
     return str(ipaddress.ip_interface(addr).network[1]) if addr else None
+
+
+def wg_info(ifname):
+    """A WireGuard interface's server peer: {server, handshake_age, ...};
+    None if ifname isn't WireGuard (or wg isn't installed)."""
+    try:
+        dump = sh("wg", "show", ifname, "dump", check=False).splitlines()
+    except FileNotFoundError:
+        return None
+    if not dump:
+        return None
+    peers = [l.split("\t") for l in dump[1:]]
+    if not peers:
+        return {"server": None, "handshake_age": None, "endpoint": None}
+    # one peer: the server (public key, psk, endpoint, allowed-ips, handshake, rx, tx, keepalive)
+    key, _psk, endpoint, allowed, hs = peers[0][:5]
+    server = allowed.split(",")[0].split("/")[0] if allowed != "(none)" else None
+    hs = int(hs)
+    return {"server": server, "key": key,
+            "endpoint": None if endpoint == "(none)" else endpoint,
+            "handshake_age": int(time.time()) - hs if hs else None}
+
+
+def wg_reresolve(ifname, info):
+    """WireGuard resolves the server's name only when the interface comes up:
+    if the server moved (new IP after a rebuild), look the name up again and
+    point the peer at it. Only when there has been no handshake for 3 minutes."""
+    age = info.get("handshake_age")
+    if age is not None and age < 180:
+        return None
+    try:
+        with open("/etc/wireguard/%s.conf" % ifname) as f:
+            ep = next((l.split("=", 1)[1].strip() for l in f
+                       if l.split("=", 1)[0].strip().lower() == "endpoint"), None)
+    except OSError:
+        return None
+    if not ep or ":" not in ep:
+        return None
+    host, port = ep.rsplit(":", 1)
+    try:
+        ip = socket.getaddrinfo(host, int(port), socket.AF_INET,
+                                socket.SOCK_DGRAM)[0][4][0]
+    except (OSError, ValueError):
+        return None
+    new = "%s:%s" % (ip, port)
+    if new == info.get("endpoint"):
+        return None
+    sh("wg", "set", ifname, "peer", info["key"], "endpoint", new, check=False)
+    return new
+
+
+def vpn_status(ifname, server_conf=""):
+    """One VPN interface: address, server, reachability (and WireGuard handshake)."""
+    st = {"if": ifname, "ip": if_ip(ifname)}
+    wg = wg_info(ifname) if st["ip"] else None
+    if wg is not None:
+        st["type"] = "wireguard"
+        st["server"] = server_conf or wg["server"]
+        st["handshake_age"] = wg["handshake_age"]
+        moved = wg_reresolve(ifname, wg) if wg.get("key") else None
+        if moved:
+            st["endpoint_reresolved"] = moved
+    else:
+        st["type"] = "openvpn"
+        st["server"] = server_conf or tun_server(ifname)
+    st["server_reachable"] = bool(st["ip"] and st["server"]) and ping(st["server"])
+    return st
 
 
 def eth0_mac():
@@ -493,12 +564,19 @@ def cmd_run(conf):
     host = socket.gethostname()
     st = {"host": host, "eth0_mac": eth0_mac(),
           "time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "errors": []}
-    tun_if = conf["tun_if"]
-    server = conf["vpn_server"] or tun_server(tun_if)
-    st["vpn"] = {"if": tun_if, "ip": if_ip(tun_if), "server": server,
-                 "server_reachable": bool(server) and ping(server)}
-    if not st["vpn"]["ip"]:
-        st["errors"].append("VPN interface %s has no address" % tun_if)
+    tun_ifs = conf["tun_if"].replace(",", " ").split()
+    st["vpns"] = [vpn_status(i) for i in tun_ifs]
+    up = [v for v in st["vpns"] if v["ip"]]
+    if conf["vpn_server"] and up:
+        up[0].update(server=conf["vpn_server"],
+                     server_reachable=ping(conf["vpn_server"]))
+    # "vpn": the first one up (what the setup page and older readers show)
+    st["vpn"] = next((v for v in up if v["server_reachable"]), up[0] if up else
+                     {"if": tun_ifs[0] if tun_ifs else None, "ip": None,
+                      "server": None, "server_reachable": False})
+    if not up:
+        st["errors"].append("no VPN interface has an address (%s)"
+                            % ", ".join(tun_ifs))
 
     state = load_json(STATE_FILE)
     devices = [] if conf["gateway_ip"] else discover(
@@ -521,8 +599,8 @@ def cmd_run(conf):
                          "answers": probe is not None}
         if not probe:
             st["errors"].append("gateway %s does not answer" % dev["ip"])
-        changed, lan_if = apply_forward(dev["ip"], tun_if)
-        st["forward"] = {"from": "%s:%d" % (tun_if, KNX_PORT),
+        changed, lan_if = apply_forward(dev["ip"], tun_ifs)
+        st["forward"] = {"from": "%s:%d" % ("/".join(tun_ifs), KNX_PORT),
                          "to": "%s:%d" % (dev["ip"], KNX_PORT),
                          "lan_if": lan_if, "changed": changed}
         st["lan"] = {"if": lan_if, "ip": if_ip(lan_if) if lan_if else None}
