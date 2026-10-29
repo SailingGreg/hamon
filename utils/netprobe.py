@@ -22,13 +22,15 @@
 # Targets come from TARGETS, one per line (site names stay out of git):
 #   icmp <label> <host>
 #   knx  <label> <host>[:port]
-# Without the file: the default gateway, 1.1.1.1, 8.8.8.8 and 9.9.9.9.
+# Without the file: the default gateway, 1.1.1.1, 8.8.8.8 and 9.9.9.9 (some
+# providers' gateways drop ICMP - leave it out of TARGETS then).
 #
 # Usage: netprobe.py             from systemd (netprobe.service)
 # Env overrides: TARGETS, LOGDIR, KEEP_DAYS (30), KNX_EVERY (5), KNX_WAIT (2)
 #
 
 import os
+import select
 import socket
 import subprocess
 import sys
@@ -128,7 +130,7 @@ class Stats:
         self.sent, self.lost, self.rtt = 0, 0, []
 
     def text(self, label):
-        rtt = ("%.0f/%.0f" % (sorted(self.rtt)[len(self.rtt) // 2],
+        rtt = ("%.1f/%.1f" % (sorted(self.rtt)[len(self.rtt) // 2],
                               max(self.rtt))) if self.rtt else "-"
         return "%s %d/%d %s" % (label, self.lost, self.sent, rtt)
 
@@ -171,16 +173,7 @@ def main():
                 lost_now.append(label)
         pings = []
 
-        # KNX replies, and probes that have waited too long
-        while True:
-            try:
-                data, src = sock.recvfrom(1024)
-            except (BlockingIOError, InterruptedError):
-                break
-            if src in pending and data[2:4] == b"\x02\x04":
-                label, t0 = pending.pop(src)
-                stats[label].sent += 1
-                stats[label].rtt.append((time.time() - t0) * 1000)
+        # KNX probes that have waited too long (replies are read below)
         for key, (label, t0) in list(pending.items()):
             if time.time() - t0 > KNX_WAIT:
                 del pending[key]
@@ -227,8 +220,22 @@ def main():
                     except OSError:
                         pass
 
+        # wait for the next second, reading KNX replies as they arrive
         tick += 1
-        time.sleep(max(0, tick - time.time()))
+        while True:
+            left = tick - time.time()
+            if left <= 0:
+                break
+            if not select.select([sock], [], [], left)[0]:
+                continue
+            try:
+                data, src = sock.recvfrom(1024)
+            except OSError:
+                continue
+            if src in pending and data[2:4] == b"\x02\x04":
+                label, t0 = pending.pop(src)
+                stats[label].sent += 1
+                stats[label].rtt.append((time.time() - t0) * 1000)
 
 
 if __name__ == "__main__":
