@@ -1,0 +1,62 @@
+#!/bin/bash
+#
+# wg-peer - manage the boxes on the central WireGuard interface
+#
+#   wg-peer add <box> <public-key> <address>   e.g. wg-peer add hapi-f13e7e <key> 10.87.0.202
+#   wg-peer remove <box>                       revoke: its tunnel stops at once
+#   wg-peer list                               box, address, last handshake, traffic
+#   wg-peer sync                               rebuild the interface from peers/ (hitless)
+#   wg-peer server                             what a box needs: server public key, port
+#
+# The box makes its own private key and never sends it; only the public key
+# comes here (from enrolment). An address is only ever one box's: add refuses
+# a clash. PersistentKeepalive is set on the box side (it is behind NAT).
+#
+
+set -euo pipefail
+D=/etc/wg-central
+[ -f $D/wg-central.env ] && . $D/wg-central.env
+WG_IF=${WG_IF:-wg0}
+WG_PORT=${WG_PORT:-51820}
+umask 077
+
+sync() {
+    local conf
+    conf=$(mktemp)
+    { printf '[Interface]\nPrivateKey = %s\nListenPort = %s\n' "$(cat $D/server.key)" "$WG_PORT"
+      for p in $D/peers/*.peer; do
+          [ -f "$p" ] || continue
+          . "$p"
+          printf '\n# %s\n[Peer]\nPublicKey = %s\nAllowedIPs = %s/32\n' "$(basename "$p" .peer)" "$PublicKey" "$Address"
+      done; } > "$conf"
+    wg syncconf "$WG_IF" "$conf"
+    rm -f "$conf"
+}
+
+case "${1:-}" in
+    add)
+        [ $# -eq 4 ] || { echo "usage: wg-peer add <box> <public-key> <address>" >&2; exit 2; }
+        box=$2 key=$3 addr=$4
+        [[ $box =~ ^[a-z0-9-]+$ ]] || { echo "bad box name" >&2; exit 2; }
+        [[ $key =~ ^[A-Za-z0-9+/]{43}=$ ]] || { echo "not a WireGuard public key" >&2; exit 2; }
+        if grep -lx "Address=$addr" $D/peers/*.peer 2>/dev/null | grep -v "/$box.peer$"; then
+            echo "address $addr already belongs to the box above" >&2; exit 1
+        fi
+        printf 'PublicKey=%s\nAddress=%s\n' "$key" "$addr" > $D/peers/$box.peer
+        sync; echo "added $box $addr" ;;
+    remove)
+        [ -f $D/peers/$2.peer ] || { echo "no box $2" >&2; exit 1; }
+        rm -f $D/peers/$2.peer; sync; echo "removed $2" ;;
+    sync) sync ;;
+    server) echo "PublicKey=$(wg pubkey < $D/server.key) Port=$WG_PORT" ;;
+    list)
+        now=$(date +%s)
+        declare -A name=()
+        for p in $D/peers/*.peer; do [ -f "$p" ] || continue; . "$p"; name[$PublicKey]=$(basename "$p" .peer); done
+        printf '%-16s %-14s %-12s %-24s %s\n' box address handshake endpoint rx/tx
+        wg show "$WG_IF" dump | tail -n +2 | while IFS=$'\t' read -r pub psk ep ips hs rx tx ka; do
+            if [ "$hs" = 0 ]; then age=never; else age="$((now - hs))s ago"; fi
+            printf '%-16s %-14s %-12s %-24s %s/%s\n' "${name[$pub]:-?}" "${ips%/32}" "$age" "$ep" "$rx" "$tx"
+        done ;;
+    *) sed -n '3,9p' "$0" >&2; exit 2 ;;
+esac
