@@ -109,7 +109,8 @@ the old address noted as the fallback.
 password, a new ssh session gets sudo without it until the cache expires (`sudo -k` ends it).
 
 **Gateway choice** (`hapi-agent`, every 10 minutes): it finds the gateway with a KNXnet/IP
-search and writes the forward (own chains `HAPI-DNAT`/`HAPI-SNAT`, saved), following the
+search and writes the forward for UDP and TCP 3671 (tunnelling v1 and v2; own chains
+`HAPI-DNAT`/`HAPI-SNAT`, saved), following the
 gateway if its IP changes. With several tunnelling gateways it refuses to guess: the
 installer picks one on the setup page, or from the server
 `ssh pivpn@10.86.0.N sudo hapi-agent pin <serial>` (`unpin` = automatic again). If
@@ -169,8 +170,10 @@ Then check the kernel actually has the forward. `iptables` needs the Pi's sudo p
 sudo iptables -t nat -S HAPI-DNAT     # the forward itself
 # -N HAPI-DNAT
 # -A HAPI-DNAT -i tun0 -p udp -m udp --dport 3671 -j DNAT --to-destination 192.168.1.98:3671
+# -A HAPI-DNAT -i tun0 -p tcp -m tcp --dport 3671 -j DNAT --to-destination 192.168.1.98:3671
 sudo iptables -t nat -S HAPI-SNAT     # replies come back to the Pi
 # -A HAPI-SNAT -d 192.168.1.98/32 -o eth0 -p udp -m udp --dport 3671 -j MASQUERADE
+# -A HAPI-SNAT -d 192.168.1.98/32 -o eth0 -p tcp -m tcp --dport 3671 -j MASQUERADE
 sudo iptables -t nat -L HAPI-DNAT -nv # pkts column: new flows forwarded (hamon connects)
 sudo conntrack -L -p udp --dport 3671 # live flow: src 10.86.0.1 -> 10.86.0.N, reply from GW
 ```

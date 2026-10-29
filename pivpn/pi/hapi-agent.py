@@ -266,14 +266,17 @@ def ensure_chain(chain, parent):
 
 
 def apply_forward(gw_ip, tun_if):
-    """Point tun_if:3671 at the gateway; returns True when rules changed."""
+    """Point tun_if:3671 at the gateway; returns True when rules changed.
+    UDP for tunnelling v1, TCP for v2 (KNX IP gateways that offer TCP)."""
     lan_if = route_dev(gw_ip)
     want = {
-        DNAT_CHAIN: ["-A %s -i %s -p udp -m udp --dport %d -j DNAT "
+        DNAT_CHAIN: ["-A %s -i %s -p %s -m %s --dport %d -j DNAT "
                      "--to-destination %s:%d"
-                     % (DNAT_CHAIN, tun_if, KNX_PORT, gw_ip, KNX_PORT)],
-        SNAT_CHAIN: ["-A %s -d %s/32 -o %s -p udp -m udp --dport %d "
-                     "-j MASQUERADE" % (SNAT_CHAIN, gw_ip, lan_if, KNX_PORT)],
+                     % (DNAT_CHAIN, tun_if, p, p, KNX_PORT, gw_ip, KNX_PORT)
+                     for p in ("udp", "tcp")],
+        SNAT_CHAIN: ["-A %s -d %s/32 -o %s -p %s -m %s --dport %d "
+                     "-j MASQUERADE" % (SNAT_CHAIN, gw_ip, lan_if, p, p, KNX_PORT)
+                     for p in ("udp", "tcp")],
     }
     ensure_chain(DNAT_CHAIN, "PREROUTING")
     ensure_chain(SNAT_CHAIN, "POSTROUTING")
@@ -289,8 +292,9 @@ def apply_forward(gw_ip, tun_if):
             f.write("1\n")
         subprocess.run(["netfilter-persistent", "save"], capture_output=True)
         # existing conntrack entries keep the old target until they expire
-        subprocess.run(["conntrack", "-D", "-p", "udp", "--dport",
-                        str(KNX_PORT)], capture_output=True)
+        for p in ("udp", "tcp"):
+            subprocess.run(["conntrack", "-D", "-p", p, "--dport",
+                            str(KNX_PORT)], capture_output=True)
     return changed, lan_if
 
 
