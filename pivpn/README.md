@@ -82,6 +82,13 @@ unit:
 ./hapi-assign.sh -r 10.86.0.201 bench-test   # renew its certificate
 ```
 
+This is also the **upgrade path** for a box already on site: the re-run copies the current
+`pi/` (hapi-agent, setup page, swap and enrolment tools) and re-applies the install, keeping
+the secrets, the VPN profile and the gateway choice. It works for boxes built before remote
+mode existed. When the new agent changes the forward rules (e.g. the TCP 3671 rules for
+tunnelling v2), it clears the KNX conntrack entries once, so a live hamon tunnel through the
+box may reconnect once.
+
 A re-run of the build doesn't upgrade installed packages (an openvpn upgrade would restart the
 tunnel under us; unattended-upgrades does that) and keeps the gateway choice; don't use
 `--ship` on a Pi on site, it clears that choice. A new profile (`hapi-assign`) is applied by

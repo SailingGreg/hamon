@@ -17,7 +17,8 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HAMON="$(dirname "$HERE")"
-REGISTER="${REGISTER:-$HAMON/docs/hapi-devices.md}"
+PROD="${PROD:-greg@home.monitor-software.com}"         # holds the device register
+SSHOPT=(-o BatchMode=yes -o ConnectTimeout=10)
 OUTDIR="${OUTDIR:-}"
 LABEL_MM="${LABEL_MM:-62x29}"
 DPI=300
@@ -30,7 +31,7 @@ command -v qrencode >/dev/null || die "needs qrencode (apt install qrencode)"
 [ -n "$OUTDIR" ] || { [ "$ON_PROD" = 1 ] && OUTDIR=~/pivpn/labels || OUTDIR="$HAMON/docs/labels"; }
 
 CODE=$(reg_field "$DEV" 7)
-[ -n "$CODE" ] || die "$DEV has no setup code in $REGISTER"
+[ -n "$CODE" ] || die "$DEV has no setup code in the register (prod ~/pivpn/hapi-devices.md)"
 URL="http://$DEV.local/"
 
 w_mm=${LABEL_MM%x*} h_mm=${LABEL_MM#*x}

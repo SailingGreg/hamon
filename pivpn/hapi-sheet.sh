@@ -18,7 +18,8 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HAMON="$(dirname "$HERE")"
-REGISTER="${REGISTER:-$HAMON/docs/hapi-devices.md}"
+PROD="${PROD:-greg@home.monitor-software.com}"         # holds the device register
+SSHOPT=(-o BatchMode=yes -o ConnectTimeout=10)
 OUTDIR="${OUTDIR:-}"
 
 [ "$#" -eq 1 ] || { echo "usage: $0 <hapi-xxxxxx>" >&2; exit 2; }
@@ -30,7 +31,7 @@ CHROMIUM=$(command -v chromium || command -v chromium-browser || true)   # PDF o
 [ -n "$OUTDIR" ] || { [ "$ON_PROD" = 1 ] && OUTDIR=~/pivpn/labels || OUTDIR="$HAMON/docs/labels"; }
 
 CODE=$(reg_field "$DEV" 7)
-[ -n "$CODE" ] || die "$DEV has no setup code in $REGISTER"
+[ -n "$CODE" ] || die "$DEV has no setup code in the register (prod ~/pivpn/hapi-devices.md)"
 URL="http://$DEV.local/"
 
 umask 077
