@@ -21,10 +21,14 @@
 #      map a site to it later - hamon.yml dns: 10.86.0.N, and hapi-commission.sh
 #   2. wait for the box on the VPN (it polls every 2 minutes)
 #   3. adopt it over the VPN through prod: hapi-build.sh 10.86.0.N (password,
-#      setup code, register, the image's temporary sudo removed, lock-down check)
-#   4. record it (and the site, if given) in the register; install sheet
+#      setup code, register, the image's temporary sudo removed, lock-down check;
+#      the build also makes the box's WireGuard key)
+#   4. WireGuard beside OpenVPN: hapi-wg.sh 10.86.0.N gives it 10.88.0.N on
+#      prod's wg-central (skipped with --no-wg, or if wg-central isn't running)
+#   5. record it (and the site, if given) in the register; install sheet
 #
-#   -y   don't ask for confirmation
+#   -y       don't ask for confirmation
+#   --no-wg  OpenVPN only (hapi-wg.sh <ip> adds WireGuard later)
 #
 # PROD (default greg@home.monitor-software.com): the Pi-VPN server.
 #
@@ -94,6 +98,8 @@ if [ -f "$P/pki/issued/$site.crt" ]; then
     echo "$site: certificate revoked (CRL to the CA's expiry)"
 fi
 rm -f "$P/ccd/$site" "$P/clients/$site.tc2" "$P/pki/reqs/$site.req" "$P/enrol/approved/$box.json" "$P/enrol/approved/$box.ovpn" "$P/enrol/refused/$box.json"
+# its WireGuard link too (the new card makes a new key; hapi-wg.sh re-admits it)
+docker exec wg-central wg-peer remove "$box" >/dev/null 2>&1 && echo "$box: WireGuard link revoked" || true
 ssh-keygen -R "$ip" >/dev/null 2>&1 || true
 echo "$box: approval cleared, $ip free"
 PRODEOF
@@ -104,15 +110,16 @@ PRODEOF
     exit 0
 fi
 
-WANT="" YES=0
-while [ "$#" -gt 2 ]; do
+WANT="" YES=0 WG=1
+while [ "$#" -gt 1 ]; do
     case "$1" in
         -i) WANT=$2; shift 2 ;;
         -y) YES=1; shift ;;
+        --no-wg) WG=0; shift ;;
         *) break ;;
     esac
 done
-[ "$#" -ge 1 ] && [ "$#" -le 2 ] || die "usage: $0 [-i N] [-y] <box> [<site>]   (or --list, --reject <box>, --forget <box>)"
+[ "$#" -ge 1 ] && [ "$#" -le 2 ] || die "usage: $0 [-i N] [-y] [--no-wg] <box> [<site>]   (or --list, --reject <box>, --forget <box>)"
 BOX=$1 SITE=${2:-}
 [[ $BOX =~ ^hapi-[0-9a-f]{6}$ ]] || die "box names are hapi-xxxxxx"
 [ -z "$SITE" ] || [[ $SITE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "site names are letters, digits, _ . and - only"
@@ -205,7 +212,18 @@ ssh-keygen -R "$IP" >/dev/null 2>&1 || true
 onprod "ssh-keygen -R $IP" >/dev/null 2>&1 || true
 "$HERE/hapi-build.sh" "$IP"
 
-# --- 4. register -------------------------------------------------------------------
+# --- 4. WireGuard beside OpenVPN ----------------------------------------------------
+WGIP=""
+if [ "$WG" = 1 ]; then
+    if onprod "docker inspect -f '{{.State.Running}}' wg-central 2>/dev/null | grep -qx true"; then
+        "$HERE/hapi-wg.sh" "$IP" && WGIP=10.88.0.${IP##*.} ||
+            echo "warning: WireGuard not added (OpenVPN is fine): ./hapi-wg.sh $IP to retry"
+    else
+        echo "wg-central isn't running on prod: OpenVPN only (./hapi-wg.sh $IP once it is)"
+    fi
+fi
+
+# --- 5. register -------------------------------------------------------------------
 reg_assign "$BOX" "$SITE" "$IP" "Approved $(date +%F) ${SITE:+for $SITE}${SITE:-as stock}"
 PIOPT=("${SSHOPT[@]}"); [ "$ON_PROD" = 1 ] || PIOPT+=(-J "$PROD")
 model=$(ssh "${PIOPT[@]}" "pivpn@$IP" "tr -d '\0' </proc/device-tree/model; echo -n ', Debian '; cat /etc/debian_version; echo -n ', '; sed -n 's/^image=//p' /etc/hapi/image")
@@ -213,8 +231,9 @@ reg_build "$BOX" "approve ${SITE:-stock} $IP" "$model" "$(reg_hostkey "pivpn@$IP
 reg_push
 "$HERE/hapi-sheet.sh" "$BOX" >/dev/null && echo "install sheet: docs/labels/$BOX-install.pdf (send it to the installer)"
 echo
+DNS="$IP${WGIP:+ (OpenVPN) or $WGIP (WireGuard)}"
 if [ -n "$SITE" ]; then
-    echo "hamon-upload / hamon.yml for $SITE: dns $IP, port 3671 (then on site: hapi-commission.sh $BOX $SITE)"
+    echo "hamon-upload / hamon.yml for $SITE: dns $DNS, port 3671 (then on site: hapi-commission.sh $BOX $SITE)"
 else
-    echo "stock box: on site day, hapi-commission.sh $BOX <site>; hamon.yml dns $IP, port 3671 (can be set in advance)"
+    echo "stock box: on site day, hapi-commission.sh $BOX <site>; hamon.yml dns $DNS, port 3671 (can be set in advance)"
 fi
