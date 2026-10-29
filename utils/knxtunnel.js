@@ -52,9 +52,18 @@ const log = (...a) => console.log(stamp(), ...a)
 let telegrams = 0, last = null, maxGap = 0, maxGapAt = null, connects = 0, drops = 0, errors = 0
 let downSince = null, down = 0
 
+// knxultimate binds to the first suitable interface (eth0 on the servers);
+// a gateway behind a VPN interface (Pi-VPN, WireGuard) is then unreachable
+// over UDP. Use the source address the kernel would pick, as the shim does.
+let localIPAddress
+try {
+    const m = require('child_process').execFileSync('ip', ['route', 'get', host], { encoding: 'utf8' }).match(/ src (\S+)/)
+    if (m) localIPAddress = m[1]
+} catch (e) { }
+
 const client = new KNXClient({
     hostProtocol: tcp ? 'TunnelTCP' : 'TunnelUDP',
-    ipAddr: host, ipPort: port, physAddr: phyAddr,
+    ipAddr: host, ipPort: port, physAddr: phyAddr, localIPAddress,
     autoReconnect: true, loglevel: 'error', setPrefix: 'knxtunnel',
 })
 client.on(KNXClientEvents.connected, () => {

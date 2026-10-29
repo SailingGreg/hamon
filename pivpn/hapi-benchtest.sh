@@ -48,7 +48,7 @@ ss -lun | grep -q ':3671 ' && die "UDP 3671 is in use here - the fake gateway ne
 echo "$DEV ($PI), tunnel address $IP"
 
 log=$(mktemp)
-python3 -u "$HERE/pi/fake-gateway.py" --name "hapi bench gateway" >"$log" 2>&1 &
+python3 -u "$HERE/pi/fake-gateway.py" --tcp --name "hapi bench gateway" >"$log" 2>&1 &
 fake=$!
 trap 'kill $fake 2>/dev/null; rm -f "$log"' EXIT
 sleep 1

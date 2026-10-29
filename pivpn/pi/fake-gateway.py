@@ -3,15 +3,18 @@
 # fake-gateway.py  -  minimal KNXnet/IP gateway for testing hapi-agent (and
 # the VPN forward) without hardware.  Answers SEARCH (multicast 224.0.23.12),
 # DESCRIPTION and tunnelling CONNECT / CONNECTIONSTATE / DISCONNECT; it does
-# not carry any KNX telegrams.
+# not carry any KNX telegrams. With --tcp it also accepts tunnelling v2 over
+# TCP on port 3671 (and advertises tunnelling version 2).
 #
-#   ./fake-gateway.py [--name NAME] [--serial HEX12] [--slots N] [--no-tunnel]
+#   ./fake-gateway.py [--name NAME] [--serial HEX12] [--slots N] [--no-tunnel] [--tcp]
 #
 # Run it on a host on the Pi's LAN; Ctrl-C to stop.
 
 import argparse
+import select
 import socket
 import struct
+import time
 
 p = argparse.ArgumentParser()
 p.add_argument("--name", default="fake KNX IP gateway")
@@ -21,19 +24,27 @@ p.add_argument("--ia", default="1.1.250")
 p.add_argument("--slots", type=int, default=1)
 p.add_argument("--no-tunnel", action="store_true",
                help="advertise routing only (not a tunnelling gateway)")
+p.add_argument("--tcp", action="store_true",
+               help="also accept tunnelling v2 over TCP")
 a = p.parse_args()
+_print = print
+
+
+def print(*args):
+    _print(time.strftime("%H:%M:%S"), *args, flush=True)
+
 
 families = [(0x02, 1), (0x03, 1), (0x05, 1)]   # core, mgmt, routing
 if not a.no_tunnel:
-    families.append((0x04, 1))                 # tunnelling
+    families.append((0x04, 2 if a.tcp else 1))  # tunnelling (v2 = TCP)
 
 
 def frame(service, body):
     return struct.pack("!BBHH", 6, 0x10, service, 6 + len(body)) + body
 
 
-def hpai(ip, port):
-    return struct.pack("!BB4sH", 8, 1, socket.inet_aton(ip), port)
+def hpai(ip, port, proto=1):
+    return struct.pack("!BB4sH", 8, proto, socket.inet_aton(ip), port)
 
 
 def ia(s):
@@ -68,38 +79,93 @@ print("fake gateway on %s:3671 (%s, serial %s, %d slot(s)%s)" % (
     my_ip, a.name, a.serial, a.slots, ", no tunnelling" if a.no_tunnel else ""))
 
 channels, next_ch = {}, 1
-while True:
-    data, src = s.recvfrom(1024)
-    if len(data) < 6 or data[:2] != b"\x06\x10":
-        continue
+
+
+def handle(data, src, send, tcp=None):
+    """Answer one frame; send(frame, addr) replies (addr ignored on TCP)."""
+    global next_ch
     service = struct.unpack("!H", data[2:4])[0]
     body = data[6:]
     if service == 0x0201:                       # SEARCH
-        s.sendto(frame(0x0202, hpai(my_ip, 3671) + dibs()),
-                 reply_to(body, src))
+        send(frame(0x0202, hpai(my_ip, 3671) + dibs()), reply_to(body, src))
         print("search from", src[0])
     elif service == 0x0203:                     # DESCRIPTION
-        s.sendto(frame(0x0204, dibs()), reply_to(body, src))
-        print("description from", src[0])
+        send(frame(0x0204, dibs()), reply_to(body, src))
+        print("description from %s%s" % (src[0], " (TCP)" if tcp else ""))
     elif service == 0x0205:                     # CONNECT
         dest = reply_to(body, src)
         if a.no_tunnel:
-            s.sendto(frame(0x0206, bytes([0, 0x22])), dest)
+            send(frame(0x0206, bytes([0, 0x22])), dest)
         elif len(channels) >= a.slots:
-            s.sendto(frame(0x0206, bytes([0, 0x24])), dest)
+            send(frame(0x0206, bytes([0, 0x24])), dest)
             print("connect from %s refused: no free slot" % src[0])
         else:
             ch, next_ch = next_ch, next_ch % 255 + 1
-            channels[ch] = dest
-            s.sendto(frame(0x0206, bytes([ch, 0]) + hpai(my_ip, 3671) +
-                           bytes([4, 4]) + ia("1.1.251")), dest)
-            print("connect from %s -> channel %d" % (src[0], ch))
+            channels[ch] = tcp or dest
+            # on TCP the data endpoint is the connection itself ("route back")
+            data_hpai = hpai("0.0.0.0", 0, 2) if tcp else hpai(my_ip, 3671)
+            send(frame(0x0206, bytes([ch, 0]) + data_hpai +
+                       bytes([4, 4]) + ia("1.1.251")), dest)
+            print("connect from %s -> channel %d (%s)" % (src[0], ch, "TCP" if tcp else "UDP"))
     elif service == 0x0207:                     # CONNECTIONSTATE
         ch = body[0]
-        s.sendto(frame(0x0208, bytes([ch, 0 if ch in channels else 0x21])),
-                 reply_to(body[2:], src))
+        send(frame(0x0208, bytes([ch, 0 if ch in channels else 0x21])),
+             reply_to(body[2:], src))
+        if tcp:
+            print("heartbeat channel %d (TCP)" % ch)
     elif service == 0x0209:                     # DISCONNECT
         ch = body[0]
         channels.pop(ch, None)
-        s.sendto(frame(0x020A, bytes([ch, 0])), reply_to(body[2:], src))
+        send(frame(0x020A, bytes([ch, 0])), reply_to(body[2:], src))
         print("disconnect channel %d" % ch)
+
+
+def udp_send(f, addr):
+    s.sendto(f, addr)
+
+
+listener, conns = None, {}                      # conns: socket -> (peer, buffer)
+if a.tcp:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("0.0.0.0", 3671))
+    listener.listen(4)
+    print("  + TCP on %s:3671 (tunnelling v2)" % my_ip)
+
+
+def tcp_closed(c):
+    peer = conns.pop(c)[0]
+    for ch in [ch for ch, d in channels.items() if d is c]:
+        del channels[ch]
+        print("TCP from %s closed: channel %d freed" % (peer[0], ch))
+    c.close()
+
+
+while True:
+    ready = select.select([s] + ([listener] if listener else []) + list(conns), [], [])[0]
+    for r in ready:
+        if r is s:
+            data, src = s.recvfrom(1024)
+            if len(data) >= 6 and data[:2] == b"\x06\x10":
+                handle(data, src, udp_send)
+        elif r is listener:
+            c, peer = listener.accept()
+            conns[c] = (peer, b"")
+            print("TCP connection from %s:%d" % peer)
+        else:
+            peer, buf = conns[r]
+            more = r.recv(4096)
+            if not more:
+                tcp_closed(r)
+                continue
+            buf += more
+            # KNXnet/IP frames are length-prefixed (header bytes 4-5)
+            while len(buf) >= 6 and len(buf) >= struct.unpack("!H", buf[4:6])[0]:
+                n = struct.unpack("!H", buf[4:6])[0]
+                if buf[:2] != b"\x06\x10" or n < 6:
+                    buf = b""
+                    break
+                handle(buf[:n], peer, lambda f, _addr, c=r: c.sendall(f), tcp=r)
+                buf = buf[n:]
+            if r in conns:
+                conns[r] = (peer, buf)
