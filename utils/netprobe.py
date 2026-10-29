@@ -19,18 +19,29 @@
 # summary line per target plus the eth0 RX drop and UdpRcvbufErrors deltas,
 # into LOGDIR/netprobe-YYYY-MM-DD.log (kept KEEP_DAYS days). Report only.
 #
+#   trace an mtr report (per-hop loss and RTT, TRACE_CYCLES pings per hop) to
+#         each trace target when an event starts - half or more of the icmp
+#         targets lost in one second, or an icmp target's RTT jumping to 5x
+#         its normal for 3 seconds (a path change) - at most once every
+#         TRACE_COOLDOWN s, one when the RTT is back to normal, and one at
+#         start and every TRACE_EVERY s as the normal path to compare with. Into LOGDIR/trace-YYYY-MM-DD.log; a
+#         TRACE line in the main log says why and when.
+#
 # Targets come from TARGETS, one per line (site names stay out of git):
-#   icmp <label> <host>
-#   knx  <label> <host>[:port]
+#   icmp  <label> <host>
+#   knx   <label> <host>[:port]
+#   trace <label> <host>
 # Without the file: the default gateway, 1.1.1.1, 8.8.8.8 and 9.9.9.9 (some
 # providers' gateways drop ICMP - leave it out of TARGETS then).
 #
 # Usage: netprobe.py             from systemd (netprobe.service)
-# Env overrides: TARGETS, LOGDIR, KEEP_DAYS (30), KNX_EVERY (5), KNX_WAIT (2)
+# Env overrides: TARGETS, LOGDIR, KEEP_DAYS (30), KNX_EVERY (5), KNX_WAIT (2),
+# TRACE_COOLDOWN (300), TRACE_EVERY (21600), TRACE_CYCLES (10)
 #
 
 import os
 import select
+import shutil
 import socket
 import subprocess
 import sys
@@ -43,6 +54,9 @@ LOGDIR = os.environ.get("LOGDIR", os.path.join(HAMON, "alerts", "netprobe"))
 KEEP_DAYS = int(os.environ.get("KEEP_DAYS", "30"))
 KNX_EVERY = int(os.environ.get("KNX_EVERY", "5"))    # seconds between probes
 KNX_WAIT = float(os.environ.get("KNX_WAIT", "2"))    # seconds before "lost"
+TRACE_COOLDOWN = int(os.environ.get("TRACE_COOLDOWN", "300"))
+TRACE_EVERY = int(os.environ.get("TRACE_EVERY", "21600"))  # baseline, 6 h
+TRACE_CYCLES = int(os.environ.get("TRACE_CYCLES", "10"))
 
 # header (06 10, service 0x0203, length 14) + HPAI (8 bytes, UDP, 0.0.0.0:0)
 REQUEST = bytes.fromhex("06100203000e" "0801" "00000000" "0000")
@@ -58,7 +72,7 @@ def default_gateway():
 
 
 def load_targets():
-    icmp, knx = [], []
+    icmp, knx, trace = [], [], []
     if os.path.exists(TARGETS):
         with open(TARGETS) as f:
             for raw in f:
@@ -68,6 +82,8 @@ def load_targets():
                 kind, label, host = parts
                 if kind == "icmp":
                     icmp.append((label, host))
+                elif kind == "trace":
+                    trace.append((label, host))
                 elif kind == "knx":
                     h, _, p = host.partition(":")
                     knx.append((label, h, int(p or 3671)))
@@ -77,7 +93,7 @@ def load_targets():
             icmp.append(("gateway", gw))
         icmp += [("cloudflare", "1.1.1.1"), ("google", "8.8.8.8"),
                  ("quad9", "9.9.9.9")]
-    return icmp, knx
+    return icmp, knx, trace
 
 
 def counters():
@@ -121,8 +137,56 @@ class Log:
     def prune(self, now):
         cutoff = (now - timedelta(days=KEEP_DAYS)).strftime("%Y-%m-%d")
         for name in os.listdir(LOGDIR):
-            if name.startswith("netprobe-") and name[9:19] < cutoff:
+            if (name.startswith("netprobe-") and name[9:19] < cutoff or
+                    name.startswith("trace-") and name[6:16] < cutoff):
                 os.remove(os.path.join(LOGDIR, name))
+
+
+class Tracer:
+    """mtr reports to the trace targets, in the background, when asked."""
+
+    def __init__(self, targets, log):
+        self.targets, self.log = targets, log
+        self.running = []        # (label, reason, started, Popen)
+        self.last = 0            # last event trace
+        self.last_base = 0
+
+    def start(self, reason, baseline=False):
+        now = time.time()
+        if not self.targets or self.running:
+            return
+        if not baseline and now - self.last < TRACE_COOLDOWN:
+            return
+        if baseline:
+            self.last_base = now
+        else:
+            self.last = now
+        self.log.write("TRACE %s: %s" % (reason, ",".join(l for l, _ in self.targets)))
+        for label, host in self.targets:
+            try:
+                cmd = (["mtr", "-n", "-r", "-w", "-c", str(TRACE_CYCLES), host]
+                       if shutil.which("mtr") else ["tracepath", "-n", host])
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, text=True)
+            except OSError as e:
+                self.log.write("TRACE %s: mtr failed (%s)" % (label, e))
+                continue
+            self.running.append((label, reason, datetime.now(), p))
+
+    def poll(self):
+        for item in list(self.running):
+            label, reason, started, p = item
+            if p.poll() is None:
+                continue
+            self.running.remove(item)
+            out = p.communicate()[0]
+            name = os.path.join(LOGDIR, "trace-%s.log" % started.strftime("%Y-%m-%d"))
+            with open(name, "a") as f:
+                f.write("=== %s %s (%s)\n%s\n" % (started.strftime("%Y-%m-%d %H:%M:%S"),
+                                                label, reason, out.rstrip()))
+
+    def due(self):
+        return self.targets and time.time() - self.last_base >= TRACE_EVERY
 
 
 class Stats:
@@ -143,12 +207,16 @@ def knx_socket():
 
 
 def main():
-    icmp, knx = load_targets()
+    icmp, knx, trace = load_targets()
     if not icmp and not knx:
         sys.exit("netprobe: no targets")
     log = Log()
-    log.write("start icmp=%s knx=%s" % (",".join(l for l, _ in icmp),
-                                        ",".join(l for l, _, _ in knx)))
+    log.write("start icmp=%s knx=%s trace=%s" % (",".join(l for l, _ in icmp),
+                                                 ",".join(l for l, _, _ in knx),
+                                                 ",".join(l for l, _ in trace)))
+    tracer = Tracer(trace, log)
+    normal = {}        # icmp label -> usual RTT (ms), learned from calm seconds
+    high = {}          # icmp label -> consecutive seconds well above it
 
     sock = knx_socket()
 
@@ -167,15 +235,36 @@ def main():
 
     while True:
         # results of last second's pings (ping -W1 has finished by now)
+        icmp_lost, jumped, back = 0, [], []
         for label, p in pings:
             out = p.communicate()[0]
             stats[label].sent += 1
             if p.returncode == 0 and "time=" in out:
-                stats[label].rtt.append(
-                    float(out.split("time=")[1].split()[0]))
+                rtt = float(out.split("time=")[1].split()[0])
+                stats[label].rtt.append(rtt)
+                base = normal.get(label)
+                if base is None or rtt < base * 3:
+                    normal[label] = rtt if base is None else base * 0.95 + rtt * 0.05
+                    if high.get(label, 0) >= 3:
+                        back.append("%s %.1f ms" % (label, rtt))
+                    high[label] = 0
+                elif rtt > max(base * 5, base + 20):
+                    high[label] = high.get(label, 0) + 1
+                    if high[label] == 3:
+                        jumped.append("%s %.0f ms (normal %.1f)" % (label, rtt, base))
             else:
                 stats[label].lost += 1
                 lost_now.append(label)
+                icmp_lost += 1
+        if pings and icmp_lost * 2 >= len(pings) and len(pings) >= 2:
+            tracer.start("loss: %d of %d icmp targets" % (icmp_lost, len(pings)))
+        elif jumped:
+            tracer.start("rtt jump: " + "; ".join(jumped))
+        elif back:
+            tracer.start("rtt back to normal: " + "; ".join(back), baseline=True)
+        elif tracer.due():
+            tracer.start("baseline", baseline=True)
+        tracer.poll()
         pings = []
 
         # KNX probes that have waited too long (replies are read below)
