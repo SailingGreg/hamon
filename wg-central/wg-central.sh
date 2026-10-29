@@ -33,16 +33,26 @@ ip link set "$WG_IF" up
 wg set "$WG_IF" listen-port "$WG_PORT" private-key $D/server.key
 WG_IF=$WG_IF wg-peer sync
 
+# use the host's iptables backend - the one already holding rules (Docker's):
+# nft on Ubuntu 22.04+, legacy on 20.04. Rules written with the other one
+# still work in the kernel but are invisible to the host's own iptables.
+ipt=iptables
+if command -v iptables-legacy-save >/dev/null; then
+    n_legacy=$(iptables-legacy-save 2>/dev/null | grep -c '^-A' || true)
+    n_nft=$(iptables-nft-save 2>/dev/null | grep -c '^-A' || true)
+    [ "$n_legacy" -gt "$n_nft" ] && ipt=iptables-legacy
+fi
+
 # boxes talk to the server only, never to each other
-iptables -C FORWARD -i "$WG_IF" -o "$WG_IF" -j DROP 2>/dev/null ||
-    iptables -I FORWARD -i "$WG_IF" -o "$WG_IF" -j DROP
+$ipt -C FORWARD -i "$WG_IF" -o "$WG_IF" -j DROP 2>/dev/null ||
+    $ipt -I FORWARD -i "$WG_IF" -o "$WG_IF" -j DROP
 # a box accepts only packets from the server's tunnel address (its AllowedIPs);
 # hamon/knxultimate bind to the host's main address, so send everything out of
 # the tunnel as WG_ADDR - hamon needs no change and boxes trust one address
-iptables -t nat -C POSTROUTING -o "$WG_IF" -j MASQUERADE 2>/dev/null ||
-    iptables -t nat -A POSTROUTING -o "$WG_IF" -j MASQUERADE
+$ipt -t nat -C POSTROUTING -o "$WG_IF" -j MASQUERADE 2>/dev/null ||
+    $ipt -t nat -A POSTROUTING -o "$WG_IF" -j MASQUERADE
 
-echo "$(date '+%F %T') $WG_IF up: $WG_ADDR udp $WG_PORT, server key $(wg pubkey < $D/server.key), $(ls $D/peers | wc -l) peer(s)"
+echo "$(date '+%F %T') $WG_IF up: $WG_ADDR udp $WG_PORT, server key $(wg pubkey < $D/server.key), $(ls $D/peers | wc -l) peer(s), $ipt"
 
 # the interface lives in the host namespace and is left up when the container
 # stops: it keeps each box's last endpoint and session, so a restart or image
