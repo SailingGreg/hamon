@@ -135,6 +135,13 @@ class Stats:
         return "%s %d/%d %s" % (label, self.lost, self.sent, rtt)
 
 
+def knx_socket():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("0.0.0.0", 0))
+    sock.setblocking(False)
+    return sock
+
+
 def main():
     icmp, knx = load_targets()
     if not icmp and not knx:
@@ -143,9 +150,7 @@ def main():
     log.write("start icmp=%s knx=%s" % (",".join(l for l, _ in icmp),
                                         ",".join(l for l, _, _ in knx)))
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("0.0.0.0", 0))
-    sock.setblocking(False)
+    sock = knx_socket()
 
     stats = {}
     for label, _ in icmp:
@@ -199,6 +204,13 @@ def main():
                 for s in stats.values():
                     s.__init__()
             minute = m
+            # a fresh source port each minute: one socket for ever keeps its
+            # conntrack entry alive, and after a VPN container restart that
+            # entry can stay stuck un-forwarded - every probe "lost" while
+            # the site is fine. Nothing is in flight here (KNX_WAIT < KNX_EVERY)
+            if knx and not pending:
+                sock.close()
+                sock = knx_socket()
             for label, host, port in knx:
                 try:
                     addr[label] = (socket.gethostbyname(host), port)
