@@ -16,6 +16,8 @@
  * It takes one more tunnel on the gateway for the duration (a gateway with
  * no free tunnel answers "no more connections") and disconnects cleanly at
  * the end. Reconnects by itself like hamon does, so a drop shows its length.
+ * SIGUSR2 runs checkConnection() (hamon's kpipe "check"), to try it on this
+ * transport.
  */
 const fs = require('fs')
 const path = require('path')
@@ -96,5 +98,6 @@ async function finish() {
 }
 setTimeout(finish, secs * 1000)
 process.on('SIGINT', finish)
+process.on('SIGUSR2', () => log('checkConnection():', client.checkConnection()))
 log(`${target}: listening for ${secs} s`)
 client.Connect()
