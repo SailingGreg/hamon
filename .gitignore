@@ -26,3 +26,5 @@ reference/
 tmp/
 # Grafana service-account token (prod only) - never commit
 grafana.token
+src/combined.log
+src/error.log
