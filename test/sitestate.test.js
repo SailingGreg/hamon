@@ -122,5 +122,12 @@ ok(st6.load() && st6.stillBlocked('m', mfp), 'misconfigured survives a save and 
 st5.set('m', 'starting')
 ok(!('reason' in st5.get('m')) && !('detail' in st5.get('m')), 'restarted: reason and detail gone')
 
+st5.note('m', { tunnelVersion: 2 })
+ok(st5.get('m').tunnelVersion === 2 && st5.get('m').state === 'starting', 'a note leaves the state alone')
+st5.set('m', 'connected')
+ok(st5.get('m').tunnelVersion === 2, 'the tunnel version stays across states')
+st5.note('nobody', { tunnelVersion: 2 })
+ok(st5.get('nobody') === undefined, 'no note for an unknown site')
+
 fs.rmSync(dir, { recursive: true, force: true })
 console.log(`sitestate: ${checks} checks passed`)

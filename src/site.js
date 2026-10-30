@@ -28,7 +28,7 @@ const { MQTTconnect, mqdisconnect } = require('./mqwrite')
 const { loadmapping, mapstring, mapaddress, addressRules } = require('./strtodpt')
 const { dptInfo } = require('./dptnames')
 const { secureOptions, dataSecureKeys } = require('./secrets')
-const { describe } = require('./knxdesc')
+const { describe, tunnellingVersion } = require('./knxdesc')
 const { createDedupe } = require('./dedupe')
 const knxstack = require('./knxstack')
 
@@ -117,6 +117,7 @@ function createSite(location, opts, hooks) {
     let lastErr = Date.now()
     let stopping = null        // the stop() promise, once stopping
     let finished = false       // a hook has been called; nothing more is reported
+    let described = false      // the gateway's tunnelling version has been asked for
 
     // report once, after the site has stopped
     function finish(hook, ...args) {
@@ -327,6 +328,12 @@ function createSite(location, opts, hooks) {
                 connected: guard(function () {
                     log.info('%s Connected - %s (%d)', ctime(), name, Date.now() - lastErr)
                     hooks.connected() // resets restart back-off
+                    // once per start: what the gateway offers, for the status
+                    // page. A description takes no tunnel slot
+                    if (!described) {
+                        described = true
+                        tunnellingVersion(knxAddr, port).then((v) => { if (v != null) hooks.gateway(v) }, () => {})
+                    }
                     clearTimeout(firstConnectHandle)
                     firstConnectHandle = null
                     if (timerHandle != null) {

@@ -1,0 +1,2 @@
+[31merror[39m: handler error "Connection timeout to 127.0.0.1:3999" {"service":"hamon","site":"alpha"}
+[31merror[39m: handler error "Connection timeout to 127.0.0.1:3998" {"service":"hamon","site":"beta"}

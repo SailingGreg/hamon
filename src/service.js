@@ -52,6 +52,7 @@ class InlineWorker extends EventEmitter {
         const name = loc.name
         this.site = createSite(loc, data, {
             connected: () => this.emit('message', { connected: name }),
+            gateway: (tunnelVersion) => this.emit('message', { gateway: name, tunnelVersion }),
             stopped: (reason, detail) => { this.emit('message', { stopped: name, reason, detail }); this.done() },
             timeout: () => { this.emit('message', name); this.done() },
             error: (err) => { this.emit('error', err); this.done() },
@@ -248,6 +249,8 @@ function start_worker(path, influxver, loc, survey, stack, dedupe) {
            everConnected.add(data.connected);
            delete lastBlocked[data.connected];
            setState(data.connected, 'connected');
+       } else if (data && data.gateway) { // what the gateway offers, for hamon-upload
+           if (siteState != null) { siteState.note(data.gateway, { tunnelVersion: data.tunnelVersion }); saveState(); }
        } else if (data && data.stopped) { // the worker stopped and says why
            stopped(data);
        } else {

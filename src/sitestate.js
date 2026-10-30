@@ -17,7 +17,8 @@
  *
  * The file is written on every change (tmp + rename, so a reader never sees a
  * half-written file) and carries the ha-mon pid and `running`, so a reader can
- * tell a current file from one left by a stopped ha-mon.
+ * tell a current file from one left by a stopped ha-mon. tunnelVersion is the
+ * gateway's own answer, kept across states: 2 = tunnelling v2, which offers TCP.
  */
 const fs = require('fs')
 
@@ -96,6 +97,7 @@ class SiteState {
             lastConnected: old.lastConnected || null,
             ...extra,
         }
+        if (old.tunnelVersion != null) s.tunnelVersion = old.tunnelVersion
         if (state === 'connected') {
             s.failures = 0
             s.lastConnected = now
@@ -105,6 +107,11 @@ class SiteState {
         if (state !== 'down') delete s.nextRetry
         this.sites[name] = s
         return s
+    }
+
+    // a fact about the site that doesn't change its state
+    note(name, fields) {
+        if (this.sites[name]) Object.assign(this.sites[name], fields)
     }
 
     // drop sites no longer in hamon.yml

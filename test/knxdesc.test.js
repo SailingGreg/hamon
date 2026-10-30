@@ -7,7 +7,7 @@
  */
 const assert = require('assert')
 const dgram = require('dgram')
-const { describe, REQUEST } = require('../src/knxdesc')
+const { describe, tunnellingVersion, tunnelVersionOf, REQUEST } = require('../src/knxdesc')
 
 // a DESCRIPTION_RESPONSE header (the DIBs don't matter to the check)
 const RESPONSE = Buffer.from('061002040008' + '0000', 'hex')
@@ -30,6 +30,18 @@ function gateway(reply) {
 ;(async () => {
     const quick = { timeout: 300, tries: 2 }
     let checks = 0
+
+    // device DIB (type 1, skipped) then families: core 2, tunnelling 1 and 2
+    const dibs = (fam) => Buffer.concat([Buffer.from('061002040000' + '0401aabb', 'hex'), Buffer.from(fam, 'hex')])
+    assert.strictEqual(tunnelVersionOf(dibs('08020201' + '04010402')), 2, 'v2 gateway')
+    assert.strictEqual(tunnelVersionOf(dibs('06020201' + '0401')), 1, 'v1 gateway')
+    assert.strictEqual(tunnelVersionOf(dibs('04020201')), null, 'no tunnelling family')
+    assert.strictEqual(tunnelVersionOf(RESPONSE), null, 'no DIBs')
+    assert.strictEqual(tunnelVersionOf(Buffer.from('061002040000' + '0002', 'hex')), null, 'a zero-length DIB ends the walk')
+    const v2 = await gateway(() => dibs('06020201' + '0402'))
+    assert.strictEqual(await tunnellingVersion('127.0.0.1', v2.address().port, quick), 2, 'read from a reply')
+    v2.close()
+    checks += 6
 
     const up = await gateway(() => RESPONSE)
     assert.strictEqual(await describe('127.0.0.1', up.address().port, quick), true, 'answering gateway')
