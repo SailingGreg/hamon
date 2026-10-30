@@ -54,6 +54,10 @@ ok(!st.stillBlocked('c', fingerprint({ ...loc, port: 3672 }, 'knxultimate', 1700
 ok(!st.stillBlocked('c', fingerprint(loc, 'knx', 1700000000000)), 'stack changed')
 ok(!st.stillBlocked('c', fingerprint(loc, 'knxultimate', 1700000000001)), 'GA file changed')
 ok(st.stillBlocked('c', fingerprint({ ...loc, port: '3671' }, 'knxultimate', 1700000000000)), 'port 3671 == "3671"')
+ok(!st.stillBlocked('c', fingerprint({ ...loc, transport: 'tcp' }, 'knxultimate', 1700000000000)), 'transport set')
+// a block stored before `transport` existed still matches a site without it
+ok(fp === '{"enabled":"true","dns":"gw.invalid","port":"3671","device":null,"logging":null,"phyAddr":"1.1.250","config":"c.xml","secure":null,"tunnelIA":null,"stack":"knxultimate","mtime":1700000000000}',
+    'fingerprint without transport unchanged')
 ok(!st.stillBlocked('a', fp), 'a connected site is not blocked')
 ok(!st.stillBlocked('nobody', fp), 'an unknown site is not blocked')
 
