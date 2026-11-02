@@ -6,6 +6,7 @@
  */
 const fs = require('fs')
 const net = require('net')
+const dnsp = require('dns').promises
 const EventEmitter = require('events')
 const { Worker } = require('worker_threads')
 const yaml = require('js-yaml')
@@ -94,6 +95,11 @@ const crashes = {}
 const crashAt = {}
 const everConnected = new Set() // sites that have connected since hamon started
 const pending = {} // back-off timers, by name
+// while a site waits out a back-off, its DNS name is looked up every
+// DNS_RECHECK: a new address (a site's broadband IP changed, its dynamic DNS
+// caught up) restarts it at once rather than after up to BACKOFF_MAX
+const DNS_RECHECK = 5 * 60 * 1000 // 5min
+const dnsWatch = {} // stop functions for those lookups, by name
 const lastBlocked = {} // why a site was last blocked, until it connects or its config changes
 
 // each site's state, kept in tmp/site-state.json (see sitestate.js); set up in
@@ -132,8 +138,32 @@ function backoffDelay(count) {
     return Math.min(BACKOFF_BASE * 2 ** (count - RESTART_FREE - 1), BACKOFF_MAX);
 }
 
+// look up host every `every` ms and call onChange(was, now) once when the
+// address differs from the first lookup (a first lookup that fails counts as
+// no address, so a name that starts resolving is a change too). Returns a
+// function that stops it.
+function watchDns(host, every, onChange, lookup = (h) => dnsp.lookup(h, { family: 4 })) {
+    let stopped = false
+    let was
+    const look = () => lookup(host).then((r) => r.address, () => null)
+    look().then((a) => { was = a })
+    const timer = setInterval(() => {
+        look().then((now) => {
+            if (stopped || was === undefined || now == null || now === was) return
+            stop()
+            onChange(was, now)
+        })
+    }, every)
+    const stop = () => { stopped = true; clearInterval(timer) }
+    return stop
+}
+
 // cancel a pending back-off restart (config change, kpipe restart)
 function cancelPending(name) {
+    if (dnsWatch[name] != null) {
+        dnsWatch[name]();
+        delete dnsWatch[name];
+    }
     if (pending[name] != null) {
         clearTimeout(pending[name]);
         delete pending[name];
@@ -316,8 +346,21 @@ function requestRestart(name) {
 function scheduleRestart(name, delay) {
     cancelPending(name);
     setState(name, 'down', { nextRetry: new Date(Date.now() + delay).toISOString() });
+    const loc = Object.values(currentLocs).find((l) => l && l.name === name); // as being applied
+    const host = loc != null && loc.dns != null ? String(loc.dns) : '';
+    if (delay > DNS_RECHECK && host !== '' && !net.isIP(host)) {
+        dnsWatch[name] = watchDns(host, DNS_RECHECK, (was, now) => {
+            delete dnsWatch[name];
+            if (pending[name] == null) return // restarted meanwhile
+            logger.info(`Back-off: ${name} ${host} now ${now} (was ${was || 'unresolved'}) - restarting now`)
+            cancelPending(name);
+            failures[name] = 0; // a new address: the normal immediate retries again
+            restart(name);
+        });
+    }
     pending[name] = setTimeout(() => {
         delete pending[name];
+        if (dnsWatch[name] != null) { dnsWatch[name](); delete dnsWatch[name]; }
         // the config may have changed while waiting
         const loc = findLoc(name, originalDoc);
         if (loc != null && loc["enabled"] == true) {
@@ -644,4 +687,4 @@ async function runService(path, hamonConfig) {
 
 module.exports.runService = runService
 // for test/crashbackoff.test.js
-module.exports._test = { noteCrash, backoffDelay, failures }
+module.exports._test = { noteCrash, backoffDelay, failures, watchDns }
