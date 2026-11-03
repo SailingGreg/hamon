@@ -1,0 +1,16 @@
+[Unit]
+Description=hamon L2TP site drop log + capture (utils/l2tp-watch.sh)
+After=docker.service ha-mon.service
+
+[Service]
+Type=simple
+User=greg
+Group=greg
+WorkingDirectory=/home/greg/hamon
+ExecStart=/bin/bash /home/greg/hamon/utils/l2tp-watch.sh
+Restart=always
+RestartSec=10
+Nice=5
+
+[Install]
+WantedBy=multi-user.target
