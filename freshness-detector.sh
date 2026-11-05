@@ -215,13 +215,15 @@ if [ -z "$THRESH_MIN" ] || [ -z "$COOLDOWN_MIN" ] || [ -z "$COOLDOWN_MAX" ]; the
 fi
 
 # cooldown state: <location> <epoch of last restart> <restarts this spell>
+# <epoch of last data, 0 = before the window>. Also read by hamon-upload, which
+# shows these sites as stalled
 declare -A LAST_ACT=() N_ACT=()
 if [ -f "$STATE" ]; then
-  while read -r l t n; do
+  while read -r l t n _; do
     [ -n "$l" ] && { LAST_ACT["$l"]="$t"; N_ACT["$l"]="$n"; }
   done < "$STATE"
 fi
-declare -A NEW_ACT=() NEW_N=()   # only still-stale sites are carried forward
+declare -A NEW_ACT=() NEW_N=() NEW_LAST=()   # only still-stale sites are carried forward
 
 # restart <loc> <age> as kapacitor/restart.sh did: docker restart for 172.*
 # container sites, then (all sites) a kpipe re-init of the hamon worker.
@@ -272,6 +274,32 @@ container_for() {  # container_for <ip> <site>
   echo ""
 }
 
+# a site silent for longer than WINDOW has no point in the freshness query and
+# would drop out of the detector altogether (seen 2026-11-05). Add every
+# site hamon holds a tunnel for (connected, or any live state for a container
+# site, as the KNOWN rule below) that the query didn't return, as "<loc>,"
+feed() {
+  local fresh l
+  fresh=$(freshness)
+  [ -n "$fresh" ] && echo "$fresh"
+  for l in "${!HAMON_SITE[@]}"; do
+    case "${HAMON_SITE[$l]}" in
+      connected) ;;
+      blocked|misconfigured|disabled) continue ;;
+      *) [[ "$(yml_field "$l" dns)" == 172.* ]] || continue ;;
+    esac
+    grep -q "^$l," <<< "$fresh" || echo "$l,"
+  done
+}
+
+# WINDOW (e.g. 24h, 2d) in minutes: the age given to a site with no point in it
+win_min() {
+  case "$WINDOW" in
+    *m) echo "${WINDOW%m}" ;; *h) echo $(( ${WINDOW%h} * 60 )) ;;
+    *d) echo $(( ${WINDOW%d} * 1440 )) ;; *) echo 1440 ;;
+  esac
+}
+
 # ---- main -------------------------------------------------------------------
 now=$(date -u +%s)
 mode_tag=$([ "$DRYRUN" = 0 ] && echo "ACT" || echo "DRYRUN")
@@ -280,15 +308,20 @@ log "freshness scan start ($mode_tag) default=${THRESH_MIN}m overrides=${#SITE_T
 stale=0 acted=0 known=0
 while IFS=, read -r loc ts; do
   [ -n "$loc" ] || continue
-  last=$(date -u -d "$ts" +%s 2>/dev/null) || continue
-  age=$(( (now - last) / 60 ))
+  if [ -z "$ts" ]; then    # no point in the window (see feed)
+    last=0; age=$(win_min); plus=+
+  else
+    plus=""
+    last=$(date -u -d "$ts" +%s 2>/dev/null) || continue
+    age=$(( (now - last) / 60 ))
+  fi
   thresh="${SITE_THRESH[$loc]:-$THRESH_MIN}"
   [ "$age" -lt "$thresh" ] && continue
 
   stale=$((stale + 1))
   enabled=$(yml_field "$loc" enabled)
   if [ "$enabled" = "false" ]; then
-    log "SKIP  $loc stale ${age}m but enabled:false"
+    log "SKIP  $loc stale ${age}m$plus but enabled:false"
     continue
   fi
 
@@ -297,7 +330,7 @@ while IFS=, read -r loc ts; do
   hs="${HAMON_SITE[$loc]:-}"
   if [ "$hs" = "misconfigured" ] || { [ -n "$hs" ] && [ "$hs" != "connected" ] && [[ "$(yml_field "$loc" dns)" != 172.* ]]; }; then
     known=$((known + 1))
-    log "KNOWN $loc ${age}m (>=${thresh}m) hamon: $hs - left to hamon"
+    log "KNOWN $loc ${age}m$plus (>=${thresh}m) hamon: $hs - left to hamon"
     continue
   fi
 
@@ -306,7 +339,7 @@ while IFS=, read -r loc ts; do
     [ "$first_loaded" = 1 ] || load_first
     fage=""; [ -n "${FIRST[$loc]:-}" ] && fage=$(( (now - FIRST[$loc]) / 60 ))
     if [ -n "$fage" ] && [ "$fage" -lt "$GRACE_MIN" ]; then
-      log "NEW   $loc ${age}m (>=${thresh}m) first data ${fage}m ago, in ${GRACE_MIN}m grace - not restarted"
+      log "NEW   $loc ${age}m$plus (>=${thresh}m) first data ${fage}m ago, in ${GRACE_MIN}m grace - not restarted"
       continue
     fi
   fi
@@ -317,21 +350,21 @@ while IFS=, read -r loc ts; do
     wait=$(( COOLDOWN_MIN * (1 << (n - 1)) ))
     [ "$wait" -gt "$COOLDOWN_MAX" ] && wait=$COOLDOWN_MAX
     if [ $(( (now - t) / 60 )) -lt "$wait" ]; then
-      log "HOLD  $loc ${age}m (>=${thresh}m) restart $n was $(( (now - t) / 60 ))m ago, next after ${wait}m"
-      NEW_ACT["$loc"]="$t"; NEW_N["$loc"]="$n"
+      log "HOLD  $loc ${age}m$plus (>=${thresh}m) restart $n was $(( (now - t) / 60 ))m ago, next after ${wait}m"
+      NEW_ACT["$loc"]="$t"; NEW_N["$loc"]="$n"; NEW_LAST["$loc"]="$last"
       continue
     fi
   fi
 
   n=$((n + 1)); acted=$((acted + 1))
   restart_site "$loc" "$age"
-  log "STALE $loc ${age}m (>=${thresh}m) hamon: ${hs:-unknown} restart $n: $HOW"
-  slack "HAMON/$loc no data for ${age}m: $HOW (restart $n)"
-  NEW_ACT["$loc"]="$now"; NEW_N["$loc"]="$n"
-done < <(freshness)
+  log "STALE $loc ${age}m$plus (>=${thresh}m) hamon: ${hs:-unknown} restart $n: $HOW"
+  slack "HAMON/$loc no data for ${age}m$plus: $HOW (restart $n)"
+  NEW_ACT["$loc"]="$now"; NEW_N["$loc"]="$n"; NEW_LAST["$loc"]="$last"
+done < <(feed)
 
 # sites not seen stale this run drop out, so their next spell starts afresh
-{ for l in "${!NEW_ACT[@]}"; do echo "$l ${NEW_ACT[$l]} ${NEW_N[$l]}"; done; } > "$STATE.tmp" \
+{ for l in "${!NEW_ACT[@]}"; do echo "$l ${NEW_ACT[$l]} ${NEW_N[$l]} ${NEW_LAST[$l]}"; done; } > "$STATE.tmp" \
   && mv "$STATE.tmp" "$STATE"
 
 log "freshness scan done ($mode_tag) stale=$stale known=$known restarted=$acted"
