@@ -281,7 +281,10 @@ container_for() {  # container_for <ip> <site>
 feed() {
   local fresh l
   fresh=$(freshness)
-  [ -n "$fresh" ] && echo "$fresh"
+  # nothing back at all = the query failed (influxd down or slow), not every
+  # site silent: add none, or each connected site would be restarted at once
+  [ -n "$fresh" ] || return 0
+  echo "$fresh"
   for l in "${!HAMON_SITE[@]}"; do
     case "${HAMON_SITE[$l]}" in
       connected) ;;
