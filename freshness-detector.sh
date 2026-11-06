@@ -56,6 +56,14 @@
 #     State is kept in STATE (one per mode, so a dry run never delays live
 #     action).  This is the external counterpart of hamon's own back-off, which
 #     a kpipe restart deliberately overrides.
+#   * Uplink hold: while the server's own uplink is down, no restart can help,
+#     and a wasted one starts the cooldown, so the useful restart after the
+#     uplink returns waits 20 min (seen 2026-11-04: a 10-min provider outage).
+#     Each run reads the last UPLINK_WINDOW s of utils/netprobe.py's LOSS lines;
+#     a target is down if it lost half or more of its probes, the uplink if
+#     half or more of all targets are (as utils/netprobe-report.py). Then a
+#     stale site is logged HOLD, not restarted, and its spell is kept as it
+#     was. netprobe not running (no log line in the last 2 min): no hold.
 #
 # Usage:
 #   DRYRUN=1 ./freshness-detector.sh     # report only (DEFAULT) - nothing restarted
@@ -64,7 +72,8 @@
 #   */5 * * * * DRYRUN=0 /home/greg/hamon/freshness-detector.sh >/dev/null 2>&1
 # Env overrides: THRESH_MIN, COOLDOWN_MIN, COOLDOWN_MAX, GRACE_MIN (beat the
 #   file), THRESH_FILE, STATE, SECRETS, WINDOW, FIRST_LOOKBACK, ORG, BUCKET,
-#   SLACK_WEBHOOK, SLACK_CHANNEL
+#   SLACK_WEBHOOK, SLACK_CHANNEL, NETPROBE_DIR, UPLINK_WINDOW, NOW (uplink
+#   check only, for testing against old logs)
 
 set -uo pipefail
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"   # cron's PATH is minimal
@@ -87,6 +96,8 @@ WINDOW="${WINDOW:-24h}"                  # freshness query lookback (>> THRESH_M
 DRYRUN="${DRYRUN:-1}"                     # 1 = report only (default), 0 = act
 STATE="${STATE:-$HAMON/tmp/freshness-state$([ "$DRYRUN" = 0 ] || echo .dryrun)}"
 SITE_STATE="${SITE_STATE:-$HAMON/tmp/site-state.json}"   # hamon's view of each site
+NETPROBE_DIR="${NETPROBE_DIR:-$HAMON/alerts/netprobe}"   # utils/netprobe.py logs
+UPLINK_WINDOW="${UPLINK_WINDOW:-30}"      # seconds of netprobe LOSS lines to judge
 
 # INFLUX_TOKEN comes from the env file on prod; on hosts where influxd accepts
 # unauthenticated local queries (e.g. staging) the file may be absent and we
@@ -303,12 +314,68 @@ win_min() {
   esac
 }
 
+# ---- uplink (utils/netprobe.py) ----------------------------------------------
+# "<down>/<targets> targets down in the last <W>s: <labels>" while the uplink
+# is down, nothing otherwise (or if netprobe isn't running). netprobe logs local
+# time; the probes per target come from its last minute summary, and a knx
+# probe is logged lost a couple of seconds after it was sent, so the window
+# ends a few seconds back.
+uplink_down() {
+  python3 - "$NETPROBE_DIR" "$UPLINK_WINDOW" "${NOW:-}" <<'PY' 2>/dev/null
+import os, sys
+from datetime import datetime, timedelta
+logdir, window, now = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+now = datetime.strptime(now, "%Y-%m-%d %H:%M:%S") if now else datetime.now()
+end = now - timedelta(seconds=3)
+start = end - timedelta(seconds=window)
+lines = []
+for day in (now - timedelta(days=1), now):
+    try:
+        with open(os.path.join(logdir, "netprobe-%s.log" % day.strftime("%Y-%m-%d"))) as f:
+            lines += f.read().splitlines()
+    except OSError:
+        pass
+rate = None                         # target -> probes a minute (last SUMMARY)
+last = None
+lost = {}
+for l in lines:
+    try:
+        t = datetime.strptime(l[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        continue
+    if t > now:
+        break
+    last = t
+    word = l[20:].split(" ", 1)
+    if word[0] == "SUMMARY" and len(word) > 1:
+        rate = {}
+        for part in word[1].split(" | "):
+            f = part.split()
+            if len(f) >= 2 and "/" in f[1] and not f[0].startswith(("rx_", "udp_")):
+                n = f[1].split("/")[1]
+                if n.isdigit() and int(n):
+                    rate[f[0]] = int(n)
+    elif word[0] == "LOSS" and start < t <= end and len(word) > 1:
+        for x in word[1].split():
+            lost[x] = lost.get(x, 0) + 1
+if not rate or last is None or (now - last).total_seconds() > 120:
+    sys.exit(0)                     # netprobe not running: no hold
+sent = {x: max(1, n * window // 60) for x, n in rate.items()}
+down = sorted(x for x in sent if lost.get(x, 0) * 2 >= sent[x])
+if len(down) * 2 >= len(sent):
+    print("%d/%d targets down in the last %ds: %s" % (len(down), len(sent), window, ",".join(down)))
+PY
+}
+
 # ---- main -------------------------------------------------------------------
 now=$(date -u +%s)
 mode_tag=$([ "$DRYRUN" = 0 ] && echo "ACT" || echo "DRYRUN")
 log "freshness scan start ($mode_tag) default=${THRESH_MIN}m overrides=${#SITE_THRESH[@]} cooldown=${COOLDOWN_MIN}-${COOLDOWN_MAX}m grace=${GRACE_MIN}m window=-${WINDOW}"
 
-stale=0 acted=0 known=0
+UPLINK=$(uplink_down)
+[ -n "$UPLINK" ] && log "UPLINK down ($UPLINK) - stale sites held, not restarted"
+
+stale=0 acted=0 known=0 held=0
 while IFS=, read -r loc ts; do
   [ -n "$loc" ] || continue
   if [ -z "$ts" ]; then    # no point in the window (see feed)
@@ -349,6 +416,14 @@ while IFS=, read -r loc ts; do
 
   # cooldown: restart now on the first stale scan, then after cooldown, 2x ...
   n="${N_ACT[$loc]:-0}"; t="${LAST_ACT[$loc]:-0}"
+
+  # uplink down: no restart can help; keep the spell as it was
+  if [ -n "$UPLINK" ]; then
+    held=$((held + 1))
+    log "HOLD  $loc ${age}m$plus (>=${thresh}m) uplink down - not restarted"
+    [ "$n" -gt 0 ] && { NEW_ACT["$loc"]="$t"; NEW_N["$loc"]="$n"; NEW_LAST["$loc"]="$last"; }
+    continue
+  fi
   if [ "$n" -gt 0 ]; then
     wait=$(( COOLDOWN_MIN * (1 << (n - 1)) ))
     [ "$wait" -gt "$COOLDOWN_MAX" ] && wait=$COOLDOWN_MAX
@@ -370,5 +445,5 @@ done < <(feed)
 { for l in "${!NEW_ACT[@]}"; do echo "$l ${NEW_ACT[$l]} ${NEW_N[$l]} ${NEW_LAST[$l]}"; done; } > "$STATE.tmp" \
   && mv "$STATE.tmp" "$STATE"
 
-log "freshness scan done ($mode_tag) stale=$stale known=$known restarted=$acted"
+log "freshness scan done ($mode_tag) stale=$stale known=$known restarted=$acted held=$held"
 exit 0
