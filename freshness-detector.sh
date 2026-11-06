@@ -56,6 +56,14 @@
 #     State is kept in STATE (one per mode, so a dry run never delays live
 #     action).  This is the external counterpart of hamon's own back-off, which
 #     a kpipe restart deliberately overrides.
+#   * Uplink hold: while the server's own uplink is down, no restart can help,
+#     and a wasted one starts the cooldown, so the useful restart after the
+#     uplink returns waits 20 min (seen 2026-11-04: a 10-min provider outage).
+#     Each run reads the last UPLINK_WINDOW s of utils/netprobe.py's LOSS lines;
+#     a target is down if it lost half or more of its probes, the uplink if
+#     half or more of all targets are (as utils/netprobe-report.py). Then a
+#     stale site is logged HOLD, not restarted, and its spell is kept as it
+#     was. netprobe not running (no log line in the last 2 min): no hold.
 #
 # Usage:
 #   DRYRUN=1 ./freshness-detector.sh     # report only (DEFAULT) - nothing restarted
@@ -64,7 +72,8 @@
 #   */5 * * * * DRYRUN=0 /home/greg/hamon/freshness-detector.sh >/dev/null 2>&1
 # Env overrides: THRESH_MIN, COOLDOWN_MIN, COOLDOWN_MAX, GRACE_MIN (beat the
 #   file), THRESH_FILE, STATE, SECRETS, WINDOW, FIRST_LOOKBACK, ORG, BUCKET,
-#   SLACK_WEBHOOK, SLACK_CHANNEL
+#   SLACK_WEBHOOK, SLACK_CHANNEL, NETPROBE_DIR, UPLINK_WINDOW, NOW (uplink
+#   check only, for testing against old logs)
 
 set -uo pipefail
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"   # cron's PATH is minimal
@@ -87,6 +96,8 @@ WINDOW="${WINDOW:-24h}"                  # freshness query lookback (>> THRESH_M
 DRYRUN="${DRYRUN:-1}"                     # 1 = report only (default), 0 = act
 STATE="${STATE:-$HAMON/tmp/freshness-state$([ "$DRYRUN" = 0 ] || echo .dryrun)}"
 SITE_STATE="${SITE_STATE:-$HAMON/tmp/site-state.json}"   # hamon's view of each site
+NETPROBE_DIR="${NETPROBE_DIR:-$HAMON/alerts/netprobe}"   # utils/netprobe.py logs
+UPLINK_WINDOW="${UPLINK_WINDOW:-30}"      # seconds of netprobe LOSS lines to judge
 
 # INFLUX_TOKEN comes from the env file on prod; on hosts where influxd accepts
 # unauthenticated local queries (e.g. staging) the file may be absent and we
@@ -215,13 +226,15 @@ if [ -z "$THRESH_MIN" ] || [ -z "$COOLDOWN_MIN" ] || [ -z "$COOLDOWN_MAX" ]; the
 fi
 
 # cooldown state: <location> <epoch of last restart> <restarts this spell>
+# <epoch of last data, 0 = before the window>. Also read by hamon-upload, which
+# shows these sites as stalled
 declare -A LAST_ACT=() N_ACT=()
 if [ -f "$STATE" ]; then
-  while read -r l t n; do
+  while read -r l t n _; do
     [ -n "$l" ] && { LAST_ACT["$l"]="$t"; N_ACT["$l"]="$n"; }
   done < "$STATE"
 fi
-declare -A NEW_ACT=() NEW_N=()   # only still-stale sites are carried forward
+declare -A NEW_ACT=() NEW_N=() NEW_LAST=()   # only still-stale sites are carried forward
 
 # restart <loc> <age> as kapacitor/restart.sh did: docker restart for 172.*
 # container sites, then (all sites) a kpipe re-init of the hamon worker.
@@ -272,23 +285,113 @@ container_for() {  # container_for <ip> <site>
   echo ""
 }
 
+# a site silent for longer than WINDOW has no point in the freshness query and
+# would drop out of the detector altogether (seen 2026-11-05). Add every
+# site hamon holds a tunnel for (connected, or any live state for a container
+# site, as the KNOWN rule below) that the query didn't return, as "<loc>,"
+feed() {
+  local fresh l
+  fresh=$(freshness)
+  # nothing back at all = the query failed (influxd down or slow), not every
+  # site silent: add none, or each connected site would be restarted at once
+  [ -n "$fresh" ] || return 0
+  echo "$fresh"
+  for l in "${!HAMON_SITE[@]}"; do
+    case "${HAMON_SITE[$l]}" in
+      connected) ;;
+      blocked|misconfigured|disabled) continue ;;
+      *) [[ "$(yml_field "$l" dns)" == 172.* ]] || continue ;;
+    esac
+    grep -q "^$l," <<< "$fresh" || echo "$l,"
+  done
+}
+
+# WINDOW (e.g. 24h, 2d) in minutes: the age given to a site with no point in it
+win_min() {
+  case "$WINDOW" in
+    *m) echo "${WINDOW%m}" ;; *h) echo $(( ${WINDOW%h} * 60 )) ;;
+    *d) echo $(( ${WINDOW%d} * 1440 )) ;; *) echo 1440 ;;
+  esac
+}
+
+# ---- uplink (utils/netprobe.py) ----------------------------------------------
+# "<down>/<targets> targets down in the last <W>s: <labels>" while the uplink
+# is down, nothing otherwise (or if netprobe isn't running). netprobe logs local
+# time; the probes per target come from its last minute summary, and a knx
+# probe is logged lost a couple of seconds after it was sent, so the window
+# ends a few seconds back.
+uplink_down() {
+  python3 - "$NETPROBE_DIR" "$UPLINK_WINDOW" "${NOW:-}" <<'PY' 2>/dev/null
+import os, sys
+from datetime import datetime, timedelta
+logdir, window, now = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+now = datetime.strptime(now, "%Y-%m-%d %H:%M:%S") if now else datetime.now()
+end = now - timedelta(seconds=3)
+start = end - timedelta(seconds=window)
+lines = []
+for day in (now - timedelta(days=1), now):
+    try:
+        with open(os.path.join(logdir, "netprobe-%s.log" % day.strftime("%Y-%m-%d"))) as f:
+            lines += f.read().splitlines()
+    except OSError:
+        pass
+rate = None                         # target -> probes a minute (last SUMMARY)
+last = None
+lost = {}
+for l in lines:
+    try:
+        t = datetime.strptime(l[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        continue
+    if t > now:
+        break
+    last = t
+    word = l[20:].split(" ", 1)
+    if word[0] == "SUMMARY" and len(word) > 1:
+        rate = {}
+        for part in word[1].split(" | "):
+            f = part.split()
+            if len(f) >= 2 and "/" in f[1] and not f[0].startswith(("rx_", "udp_")):
+                n = f[1].split("/")[1]
+                if n.isdigit() and int(n):
+                    rate[f[0]] = int(n)
+    elif word[0] == "LOSS" and start < t <= end and len(word) > 1:
+        for x in word[1].split():
+            lost[x] = lost.get(x, 0) + 1
+if not rate or last is None or (now - last).total_seconds() > 120:
+    sys.exit(0)                     # netprobe not running: no hold
+sent = {x: max(1, n * window // 60) for x, n in rate.items()}
+down = sorted(x for x in sent if lost.get(x, 0) * 2 >= sent[x])
+if len(down) * 2 >= len(sent):
+    print("%d/%d targets down in the last %ds: %s" % (len(down), len(sent), window, ",".join(down)))
+PY
+}
+
 # ---- main -------------------------------------------------------------------
 now=$(date -u +%s)
 mode_tag=$([ "$DRYRUN" = 0 ] && echo "ACT" || echo "DRYRUN")
 log "freshness scan start ($mode_tag) default=${THRESH_MIN}m overrides=${#SITE_THRESH[@]} cooldown=${COOLDOWN_MIN}-${COOLDOWN_MAX}m grace=${GRACE_MIN}m window=-${WINDOW}"
 
-stale=0 acted=0 known=0
+UPLINK=$(uplink_down)
+[ -n "$UPLINK" ] && log "UPLINK down ($UPLINK) - stale sites held, not restarted"
+
+stale=0 acted=0 known=0 held=0
 while IFS=, read -r loc ts; do
   [ -n "$loc" ] || continue
-  last=$(date -u -d "$ts" +%s 2>/dev/null) || continue
-  age=$(( (now - last) / 60 ))
+  if [ -z "$ts" ]; then    # no point in the window (see feed)
+    last=0; age=$(win_min); plus=+
+  else
+    plus=""
+    last=$(date -u -d "$ts" +%s 2>/dev/null) || continue
+    age=$(( (now - last) / 60 ))
+  fi
   thresh="${SITE_THRESH[$loc]:-$THRESH_MIN}"
   [ "$age" -lt "$thresh" ] && continue
 
   stale=$((stale + 1))
   enabled=$(yml_field "$loc" enabled)
   if [ "$enabled" = "false" ]; then
-    log "SKIP  $loc stale ${age}m but enabled:false"
+    log "SKIP  $loc stale ${age}m$plus but enabled:false"
     continue
   fi
 
@@ -297,7 +400,7 @@ while IFS=, read -r loc ts; do
   hs="${HAMON_SITE[$loc]:-}"
   if [ "$hs" = "misconfigured" ] || { [ -n "$hs" ] && [ "$hs" != "connected" ] && [[ "$(yml_field "$loc" dns)" != 172.* ]]; }; then
     known=$((known + 1))
-    log "KNOWN $loc ${age}m (>=${thresh}m) hamon: $hs - left to hamon"
+    log "KNOWN $loc ${age}m$plus (>=${thresh}m) hamon: $hs - left to hamon"
     continue
   fi
 
@@ -306,33 +409,41 @@ while IFS=, read -r loc ts; do
     [ "$first_loaded" = 1 ] || load_first
     fage=""; [ -n "${FIRST[$loc]:-}" ] && fage=$(( (now - FIRST[$loc]) / 60 ))
     if [ -n "$fage" ] && [ "$fage" -lt "$GRACE_MIN" ]; then
-      log "NEW   $loc ${age}m (>=${thresh}m) first data ${fage}m ago, in ${GRACE_MIN}m grace - not restarted"
+      log "NEW   $loc ${age}m$plus (>=${thresh}m) first data ${fage}m ago, in ${GRACE_MIN}m grace - not restarted"
       continue
     fi
   fi
 
   # cooldown: restart now on the first stale scan, then after cooldown, 2x ...
   n="${N_ACT[$loc]:-0}"; t="${LAST_ACT[$loc]:-0}"
+
+  # uplink down: no restart can help; keep the spell as it was
+  if [ -n "$UPLINK" ]; then
+    held=$((held + 1))
+    log "HOLD  $loc ${age}m$plus (>=${thresh}m) uplink down - not restarted"
+    [ "$n" -gt 0 ] && { NEW_ACT["$loc"]="$t"; NEW_N["$loc"]="$n"; NEW_LAST["$loc"]="$last"; }
+    continue
+  fi
   if [ "$n" -gt 0 ]; then
     wait=$(( COOLDOWN_MIN * (1 << (n - 1)) ))
     [ "$wait" -gt "$COOLDOWN_MAX" ] && wait=$COOLDOWN_MAX
     if [ $(( (now - t) / 60 )) -lt "$wait" ]; then
-      log "HOLD  $loc ${age}m (>=${thresh}m) restart $n was $(( (now - t) / 60 ))m ago, next after ${wait}m"
-      NEW_ACT["$loc"]="$t"; NEW_N["$loc"]="$n"
+      log "HOLD  $loc ${age}m$plus (>=${thresh}m) restart $n was $(( (now - t) / 60 ))m ago, next after ${wait}m"
+      NEW_ACT["$loc"]="$t"; NEW_N["$loc"]="$n"; NEW_LAST["$loc"]="$last"
       continue
     fi
   fi
 
   n=$((n + 1)); acted=$((acted + 1))
   restart_site "$loc" "$age"
-  log "STALE $loc ${age}m (>=${thresh}m) hamon: ${hs:-unknown} restart $n: $HOW"
-  slack "HAMON/$loc no data for ${age}m: $HOW (restart $n)"
-  NEW_ACT["$loc"]="$now"; NEW_N["$loc"]="$n"
-done < <(freshness)
+  log "STALE $loc ${age}m$plus (>=${thresh}m) hamon: ${hs:-unknown} restart $n: $HOW"
+  slack "HAMON/$loc no data for ${age}m$plus: $HOW (restart $n)"
+  NEW_ACT["$loc"]="$now"; NEW_N["$loc"]="$n"; NEW_LAST["$loc"]="$last"
+done < <(feed)
 
 # sites not seen stale this run drop out, so their next spell starts afresh
-{ for l in "${!NEW_ACT[@]}"; do echo "$l ${NEW_ACT[$l]} ${NEW_N[$l]}"; done; } > "$STATE.tmp" \
+{ for l in "${!NEW_ACT[@]}"; do echo "$l ${NEW_ACT[$l]} ${NEW_N[$l]} ${NEW_LAST[$l]}"; done; } > "$STATE.tmp" \
   && mv "$STATE.tmp" "$STATE"
 
-log "freshness scan done ($mode_tag) stale=$stale known=$known restarted=$acted"
+log "freshness scan done ($mode_tag) stale=$stale known=$known restarted=$acted held=$held"
 exit 0

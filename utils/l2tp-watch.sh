@@ -3,23 +3,25 @@
 # l2tp-watch.sh - drop log and point-of-failure capture for L2TP VPN sites
 #
 # The L2TP sites lose their KNX path every few days while the PPP session and
-# IPsec stay up, until the freshness detector restarts the container ~10 min
-# later. Nothing records what was dead at the time, so this follows hamon's
-# combined.log and for each site in an L2TP container (one with a ppp0):
+# IPsec stay up; hamon logs "Connection dead" ~90 s later and the freshness
+# detector restarts the container 10-25 min after that. That is ~3/4 of the
+# drops, so this covers only that case. It follows hamon's combined.log and for
+# each site in an L2TP container (one with a ppp0):
 #
-#   drops.log      one line per drop when it ends: site, start, end, seconds,
-#                  kind (blip = "Invalid Connection ID", outage = "Connection
-#                  dead", stall = no events for STALL s with no error logged,
-#                  as in the old kapacitor deadman case; stall-dead = hamon
-#                  said "Connection dead" later) and what ended it (self, detector = the container
-#                  was restarted meanwhile, hamon = ha-mon restarted)
-#   capture-DATE   on "Connection dead" or a stall: the container's state (ppp0, IPsec SA
+#   drops.log      one line per drop when it ends: site, start (when hamon
+#                  logged "Connection dead"), end, seconds,
+#                  and what ended it (self, or detector = the container was
+#                  restarted meanwhile)
+#   capture-DATE   on "Connection dead": the container's state (ppp0, IPsec SA
 #                  ages, processes, DNAT counters and ppp0 traffic 5 s apart,
 #                  conntrack count, pings to the PPP peer and the gateway, a
 #                  KNX DESCRIPTION through the DNAT as hamon sees it, the ppp
 #                  log tail); again 3 min later if the site is still down.
 #                  Once per container per 2 min (sites sharing one are one
 #                  capture)
+#
+# Stalls (no events and no error logged) are left to the freshness detector,
+# whose journal records them (STALE ... restart N).
 #
 # Read-only: it never restarts anything. Logs go to alerts/l2tp-watch/.
 # Runs as a service (l2tp-watch.service). One line per event on stdout.
@@ -31,7 +33,6 @@ DIR="$(cd "$(dirname "$0")/.." && pwd)"
 YML="$DIR/hamon.yml"
 CLOG="${CLOG:-$DIR/src/combined.log}"
 OUT="${OUT:-$DIR/alerts/l2tp-watch}"
-STALL=${STALL:-300}      # seconds without events from a connected site = a stall
 RECAPTURE=${RECAPTURE:-180}  # seconds after a capture to capture again if still down
 QUIET=120       # seconds between captures of one container
 
@@ -98,7 +99,7 @@ capture() {
     log "$c: captured ($why) -> $f"
 }
 
-declare -A start kind cont lastcap pending
+declare -A start cont lastcap
 
 # a capture now and, if still down, again after RECAPTURE (background)
 capture_drop() {
@@ -114,20 +115,19 @@ capture_drop() {
 }
 
 end_drop() {
-    local site=$1 t=$2 how=$3 s e
+    local site=$1 t=$2 how=self s e
     s=$(date -d "${start[$site]}" +%s); e=$(date -d "$t" +%s)
-    if [ "$how" = self ] && [ -n "${cont[$site]:-}" ] && [ "$(started_at "${cont[$site]}")" -ge "$s" ]; then
+    if [ "$(started_at "${cont[$site]}")" -ge "$s" ]; then
         how=detector
     fi
-    echo "$site ${start[$site]/ /T} ${t/ /T} $(( e - s )) ${kind[$site]} $how" >> "$OUT/drops.log"
-    log "$site: ${kind[$site]} ${start[$site]} -> $t ($(( e - s )) s, $how)"
+    echo "$site ${start[$site]/ /T} ${t/ /T} $(( e - s )) $how" >> "$OUT/drops.log"
+    log "$site: drop ${start[$site]} -> $t ($(( e - s )) s, $how)"
     rm -f "$OUT/.down-$site"
-    unset "start[$site]" "kind[$site]"
+    unset "start[$site]"
 }
 
 # the enabled sites whose dns: is an L2TP container, and those containers;
 # read once at start (restart the service after adding an L2TP site)
-declare -A last
 for site in $(awk '/^ +name:/ {n = $2; gsub(/"/, "", n)} /^ +enabled:/ {e = $2}
                    /^ +dns:/ {if ($2 ~ /^"?172\./ && e == "true") print n}' "$YML"); do
     c=$(l2tp_container "$(dns_of "$site")")
@@ -136,57 +136,26 @@ done
 [ ${#cont[@]} -gt 0 ] || { log "no L2TP sites found"; exit 1; }
 sites=$(IFS='|'; echo "${!cont[*]}")
 
-# a stall: no events for STALL s while hamon still holds the tunnel - the old
-# kapacitor case, where nothing logs "Connection dead"
-stall_check() {
-    local now site
-    now=$(date +%s)
-    for site in "${!cont[@]}"; do
-        [ -n "${last[$site]:-}" ] && [ -z "${start[$site]:-}" ] || continue
-        [ $(( now - last[$site] )) -ge "$STALL" ] || continue
-        start[$site]=$(date -d "@${last[$site]}" '+%F %T'); kind[$site]=stall
-        touch "$OUT/.down-$site"
-        log "$site: no events for $(( now - last[$site] )) s - stall"
-        capture_drop "$site" "${cont[$site]}"
-    done
-}
-
 rm -f "$OUT"/.down-*
 log "start: ${!cont[*]} (containers ${cont[*]})"
 tail -n0 -F "$CLOG" 2>/dev/null | sed -u 's/\x1b\[[0-9;]*m//g' | grep --line-buffered -E "\"site\":\"($sites)\"" |
-while true; do
-    IFS= read -r -t 30 line; rc=$?
-    if [ $rc -ne 0 ]; then
-        [ $rc -gt 128 ] || break    # EOF: tail went away, systemd restarts us
-        stall_check; continue
-    fi
+    grep --line-buffered -E '"Connection dead|Connected - ' |
+while IFS= read -r line; do
     site=$(sed -n 's/.*"site":"\([^"]*\)".*/\1/p' <<< "$line")
     [ -n "${cont[$site]:-}" ] || continue
     t=$(grep -oE '20[0-9]{2}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}' <<< "$line" | head -1)
     [ -n "$t" ] || t=$(date '+%F %T')
     case "$line" in
-        *' Event '*)
-            last[$site]=$(date +%s)
-            # a stall that clears without a reconnect ends at its first event
-            [ "${kind[$site]:-}" = stall ] && end_drop "$site" "$t" self ;;
         *'ERROR: '*'"Connection dead'*)
-            if [ -z "${start[$site]:-}" ] || [ "${kind[$site]}" = blip ]; then
-                start[$site]=${start[$site]:-$t}; kind[$site]=outage
+            if [ -z "${start[$site]:-}" ]; then
+                # hamon logs this ~90 s after the last event
+                start[$site]=$t
                 touch "$OUT/.down-$site"
                 log "$site: connection dead"
                 capture_drop "$site" "${cont[$site]}"
-            elif [ "${kind[$site]}" = stall ]; then
-                kind[$site]=stall-dead      # hamon noticed later; captured already
             fi ;;
-        *'ERROR: '*'"Invalid Connection ID"'*)
-            [ -n "${start[$site]:-}" ] || { start[$site]=$t; kind[$site]=blip; } ;;
-        *'Exiting - doing cleanup'*)
-            # ha-mon or kpipe restarting the site: note it, the drop ends at Connected
-            [ -n "${start[$site]:-}" ] && pending[$site]=hamon ;;
         *'Connected - '*)
-            [ -n "${start[$site]:-}" ] && end_drop "$site" "$t" "${pending[$site]:-self}"
-            unset "pending[$site]"
-            last[$site]=$(date +%s) ;;
+            [ -n "${start[$site]:-}" ] && end_drop "$site" "$t" ;;
     esac
-    stall_check
 done
+# EOF: tail went away, systemd restarts us
