@@ -10,6 +10,8 @@
  *                                     container site, then re-init), at once
  *   still silent                      again after cooldown, 2x ... cooldown_max
  *   data again                        the spell ends; the next starts at 1
+ *   a new site (first connected less  not restarted: its normal traffic isn't
+ *   than `grace` ago, 24 h default)   known yet (the detector's grace)
  *   the server's uplink is down       hold: no restart, the spell is kept
  *                                     (see uplink.js)
  *
@@ -31,7 +33,7 @@ function mode(doc) {
     return MODES.includes(m) ? m : 'off'
 }
 
-// { default, cooldown, cooldownMax, sites: { name: minutes } } in minutes, or
+// { default, cooldown, cooldownMax, grace, sites: { name: minutes } } in minutes, or
 // null without the three reserved keys (as the detector, which then refuses to run)
 function loadThresholds(file) {
     let text
@@ -49,7 +51,8 @@ function loadThresholds(file) {
         else sites[key] = Number(mins)
     }
     if (conf.default == null || conf.cooldown == null || conf.cooldown_max == null) return null
-    return { default: conf.default, cooldown: conf.cooldown, cooldownMax: conf.cooldown_max, sites }
+    return { default: conf.default, cooldown: conf.cooldown, cooldownMax: conf.cooldown_max,
+             grace: conf.grace != null ? conf.grace : 1440, sites }
 }
 
 // the wait after restart n of a spell, in minutes
@@ -64,12 +67,14 @@ class Silence {
         this.uplink = uplink
         this.now = now
         this.spells = {} // name -> { n, t, since }: restarts this spell, the last one's time
-        this.held = {}   // name -> true while held for the uplink (logged once)
+        this.held = {}   // name -> since when it's held for the uplink (logged once)
+        this.graced = {} // name -> since when a silent new site is left alone (logged once)
     }
 
-    // the site's last telegram (ms, or null for none since it connected) ->
-    // { do: 'restart' | 'hold' | 'end' | 'wait' | null, ... }
-    check(name, last) {
+    // the site's last telegram (ms, or null for none since it connected), and
+    // when it first connected if it's on record (ms) ->
+    // { do: 'restart' | 'hold' | 'grace' | 'end' | 'wait' | null, ... }
+    check(name, last, firstConnected = null) {
         const t = this.thresholds()
         if (t == null || last == null) return { do: null }
         const now = this.now()
@@ -78,15 +83,22 @@ class Silence {
         const spell = this.spells[name]
         if (age < thresh) {
             delete this.held[name]
+            delete this.graced[name]
             if (spell == null) return { do: null }
             delete this.spells[name]
             return { do: 'end', restarts: spell.n, minutes: Math.round((now - spell.since) / 60000) }
         }
+        if (firstConnected != null && spell == null && now - firstConnected < t.grace * 60000) {
+            const first = this.graced[name] == null
+            if (first) this.graced[name] = now
+            return { do: 'grace', age, thresh, until: firstConnected + t.grace * 60000, first, since: this.graced[name] }
+        }
+        delete this.graced[name]
         const up = this.uplink()
         if (up != null) {
-            const first = !this.held[name]
-            this.held[name] = true
-            return { do: 'hold', age, thresh, why: up, first }
+            const first = this.held[name] == null
+            if (first) this.held[name] = now
+            return { do: 'hold', age, thresh, why: up, first, since: this.held[name] }
         }
         delete this.held[name]
         if (spell != null) {
@@ -101,6 +113,7 @@ class Silence {
     forget(name) {
         delete this.spells[name]
         delete this.held[name]
+        delete this.graced[name]
     }
 }
 

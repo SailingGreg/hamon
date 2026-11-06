@@ -18,7 +18,9 @@ fs.writeFileSync(conf, '# comment\ndefault 20\ncooldown 20\ncooldown_max 240\ngr
 
 // thresholds file
 const t = loadThresholds(conf)
-assert.deepStrictEqual(t, { default: 20, cooldown: 20, cooldownMax: 240, sites: { quietsite: 720 } })
+assert.deepStrictEqual(t, { default: 20, cooldown: 20, cooldownMax: 240, grace: 1440, sites: { quietsite: 720 } })
+fs.writeFileSync(path.join(dir, 'nograce'), 'default 20\ncooldown 20\ncooldown_max 240\n')
+assert.strictEqual(loadThresholds(path.join(dir, 'nograce')).grace, 1440, 'grace defaults to 24 h')
 assert.strictEqual(loadThresholds(path.join(dir, 'none')), null)
 fs.writeFileSync(path.join(dir, 'partial'), 'default 20\n')
 assert.strictEqual(loadThresholds(path.join(dir, 'partial')), null, 'missing reserved keys: no thresholds')
@@ -69,6 +71,20 @@ assert.strictEqual(new Silence({ thresholds: () => t, now: () => 720 * MIN }).ch
 assert.strictEqual(s.check('site', null).do, null)
 assert.strictEqual(new Silence({ thresholds: () => null }).check('site', 0).do, null, 'no thresholds file: nothing done')
 
+// new-site grace: first connected less than `grace` ago - not restarted, logged once
+{
+    let gnow = 0
+    const g = new Silence({ thresholds: () => t, now: () => gnow })
+    const chk = (m, first) => { gnow = m * MIN; return g.check('new', 0, first == null ? null : first * MIN) }
+    let r = chk(30, 0)
+    assert.deepStrictEqual([r.do, r.first, r.until, r.since], ['grace', true, 1440 * MIN, 30 * MIN], 'in grace')
+    r = chk(60, 0)
+    assert.deepStrictEqual([r.do, r.first, r.since], ['grace', false, 30 * MIN], 'logged once, since kept')
+    assert.strictEqual(g.spells.new, undefined, 'no spell in grace')
+    assert.strictEqual(chk(1440, 0).do, 'restart', 'grace over: restart')
+    assert.strictEqual(new Silence({ thresholds: () => t, now: () => 30 * MIN }).check('old', 0, null).do, 'restart', 'no firstConnected on record: an established site')
+}
+
 // uplink rule, replayed on lines from 2026-11-04 (netprobe local time)
 const nd = path.join(dir, 'netprobe')
 fs.mkdirSync(nd)
@@ -107,6 +123,7 @@ console.log('silence.test.js: all checks passed')
     const sdir = fs.mkdtempSync(path.join(os.tmpdir(), 'silence-svc-'))
     const state = new SiteState(path.join(sdir, 'site-state.json'))
     state.set('direct', 'connected')
+    delete state.sites.direct.firstConnected // an established site, not a new one
     let clock = Date.parse('2026-11-06T12:00:00Z')
     const sil = new Silence({ thresholds: () => t, now: () => clock })
     const out = []
@@ -128,6 +145,25 @@ console.log('silence.test.js: all checks passed')
         assert.strictEqual(state.get('direct').silent, undefined, 'silent cleared')
         state.set('direct', 'starting')
         assert.strictEqual(state.get('direct').lastData, new Date(clock).toISOString(), 'lastData kept across states')
+        // a brand-new site: firstConnected on its first connection, then grace
+        const st2 = new SiteState(path.join(sdir, 's2.json'), { now: () => new Date(clock) })
+        st2.set('fresh', 'connected')
+        assert.strictEqual(st2.get('fresh').firstConnected, new Date(clock).toISOString(), 'firstConnected set')
+        st2.set('fresh', 'down'); clock += MIN; st2.set('fresh', 'connected')
+        assert.strictEqual(st2.get('fresh').firstConnected, new Date(clock - MIN).toISOString(), 'kept on a reconnect')
+        st2.set('old', 'connected'); st2.sites.old.lastConnected = new Date(clock - 31 * 1440 * MIN).toISOString()
+        delete st2.sites.old.firstConnected; st2.set('old', 'connected')
+        assert.strictEqual(st2.get('old').firstConnected, new Date(clock).toISOString(), 'back after 30 days: new again')
+        const st3 = new SiteState(path.join(sdir, 's3.json'), { now: () => new Date(clock) })
+        st3.sites.known = { state: 'starting', lastConnected: new Date(clock - 3600000).toISOString() }
+        st3.set('known', 'connected')
+        assert.strictEqual(st3.get('known').firstConnected, undefined, 'an existing site is not new')
+        svc.setSilence(sil, { silence: 'report', locations: [{ name: 'fresh', dns: 'gw.example', enabled: true }] }, st2)
+        svc.alive('fresh', clock)
+        clock += 25 * MIN
+        svc.alive('fresh', null)
+        assert.ok(/^Silent: fresh no data for 25m \(>= 20m\), new site - not restarted until \S+ \(report only\)$/.test(out.pop()), 'grace line')
+        assert.ok(st2.get('fresh').silent.grace, 'grace in the state')
         svc.setSilence(sil, { locations: [] }, state) // off: nothing logged
         clock += 60 * MIN
         svc.alive('direct', null)

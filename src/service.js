@@ -630,7 +630,9 @@ function alive(name, lastData) {
     if (siteState != null && lastData != null) { siteState.note(name, { lastData: iso(lastSeen[name]) }); saveState() }
     const m = silenceMode(originalDoc)
     if (m === 'off' || silence == null) return
-    const r = silence.check(name, lastSeen[name])
+    const st = siteState != null ? siteState.get(name) : null
+    const first = st != null && st.firstConnected ? Date.parse(st.firstConnected) : null
+    const r = silence.check(name, lastSeen[name], first)
     const tag = m === 'report' ? ' (report only)' : ''
     if (r.do === 'restart') {
         silenceRestart(name, m === 'act', (how) => {
@@ -640,6 +642,10 @@ function alive(name, lastData) {
         })
     } else if (r.do === 'hold' && r.first) {
         const line = `Silent: ${name} no data for ${r.age}m (>= ${r.thresh}m), held - uplink down (${r.why})${tag}`
+        console.log(line)
+        logger.warn(line)
+    } else if (r.do === 'grace' && r.first) {
+        const line = `Silent: ${name} no data for ${r.age}m (>= ${r.thresh}m), new site - not restarted until ${iso(r.until)}${tag}`
         console.log(line)
         logger.warn(line)
     } else if (r.do === 'end') {
@@ -654,7 +660,8 @@ function alive(name, lastData) {
     const t = silence.thresholds()
     let silent
     if (sp != null) silent = { since: iso(sp.since), restarts: sp.n, next: t != null ? iso(sp.t + cooldown(t, sp.n) * 60000) : null }
-    if (r.do === 'hold') silent = { ...(silent || { since: iso(Date.now()), restarts: 0 }), held: 'uplink' }
+    if (r.do === 'hold') silent = { ...(silent || { since: iso(r.since), restarts: 0 }), held: 'uplink' }
+    if (r.do === 'grace') silent = { since: iso(r.since), restarts: 0, grace: iso(r.until) }
     if (silent !== undefined || s.silent !== undefined) { siteState.note(name, { silent }); saveState() }
 }
 
