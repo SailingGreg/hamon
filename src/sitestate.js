@@ -19,6 +19,9 @@
  * half-written file) and carries the ha-mon pid and `running`, so a reader can
  * tell a current file from one left by a stopped ha-mon. tunnelVersion is the
  * gateway's own answer, kept across states: 2 = tunnelling v2, which offers TCP.
+ * lastData (the last telegram, kept across states) and, while a connected site
+ * is silent, `silent` ({ since, restarts, next }) come from service.js's
+ * silence check (silence.js).
  */
 const fs = require('fs')
 
@@ -98,6 +101,7 @@ class SiteState {
             ...extra,
         }
         if (old.tunnelVersion != null) s.tunnelVersion = old.tunnelVersion
+        if (old.lastData != null && s.lastData == null) s.lastData = old.lastData
         if (state === 'connected') {
             s.failures = 0
             s.lastConnected = now

@@ -13,6 +13,9 @@
                              ('config'): service.js marks it misconfigured
  *   timeout()                 it gave up (no connection in time, or still
  *                             failing 15 min after an error): restart with back-off
+ *   alive(lastData)           every minute while the link is up: the time of
+ *                             the last telegram (ms, null for none since the
+ *                             start), for service.js's silence check (silence.js)
  *   error(err)                anything unexpected; treated as a crash
  *
  * The site has already stopped (tunnel and MQTT closed, timers cleared) when
@@ -42,6 +45,8 @@ const FIRST_CONNECT_WAIT = 5 * 60 * 1000 // 5min
 const ERROR_WAIT = 15 * 60 * 1000
 // how long stop() waits for the gateway to confirm a DISCONNECT
 const STOP_WAIT = 3000
+// how often a connected site reports its last telegram (alive hook)
+const ALIVE_EVERY = 60 * 1000
 
 // default subtype for an ETS DPT given as the main type only (see below)
 const DEFAULT_SUBTYPE = { DPT1: '.001', DPT3: '.007', DPT5: '.001', DPT7: '.001', DPT8: '.001', DPT9: '.001', DPT18: '.001' }
@@ -118,6 +123,9 @@ function createSite(location, opts, hooks) {
     let stopping = null        // the stop() promise, once stopping
     let finished = false       // a hook has been called; nothing more is reported
     let described = false      // the gateway's tunnelling version has been asked for
+    let lastData = null        // the last telegram, any GA (ms)
+    let linkUp = false         // between 'connected' and the next error
+    let aliveHandle = null
 
     // report once, after the site has stopped
     function finish(hook, ...args) {
@@ -281,6 +289,7 @@ function createSite(location, opts, hooks) {
     }
 
     function onEvent(evt, src, dest, value) {
+        lastData = Date.now() // any telegram shows the path works, mapped or not
         if (!groupAddresses.hasOwnProperty(dest)) return logUnmapped(evt, dest, src, value, 'not in the ETS export')
         const ga = groupAddresses[dest]
         // note use of endpoint.current_value gives the 'decoded' value
@@ -328,6 +337,10 @@ function createSite(location, opts, hooks) {
                 connected: guard(function () {
                     log.info('%s Connected - %s (%d)', ctime(), name, Date.now() - lastErr)
                     hooks.connected() // resets restart back-off
+                    linkUp = true
+                    if (aliveHandle == null && hooks.alive) {
+                        aliveHandle = setInterval(() => { if (linkUp) hooks.alive(lastData) }, ALIVE_EVERY)
+                    }
                     // once per start: what the gateway offers, for the status
                     // page. A description takes no tunnel slot
                     if (!described) {
@@ -352,6 +365,7 @@ function createSite(location, opts, hooks) {
                 event: guard(onEvent),
                 error: guard(function (connstatus) {
                     lastErr = Date.now()
+                    linkUp = false
                     // a never-connected site retrying after its first give-up fails the same
                     // way each time (knxultimate reports it here, knx didn't): keep it out of
                     // error.log - the first attempt after a start or config change still errors
@@ -454,7 +468,9 @@ function createSite(location, opts, hooks) {
         if (dedupe) dedupe.flushAll() // held repeats are written, not lost
         clearTimeout(firstConnectHandle)
         clearTimeout(timerHandle)
-        firstConnectHandle = timerHandle = null
+        clearInterval(aliveHandle)
+        firstConnectHandle = timerHandle = aliveHandle = null
+        linkUp = false
         mqdisconnect(mqttClient)
         mqttClient = null
         stopping = new Promise((resolve) => {

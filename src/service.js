@@ -15,6 +15,9 @@ const effectiveStack = require('./knxstack').effective
 const { SiteState, fingerprint, needsPrecheck, CHANGE_FIELDS, HELD } = require('./sitestate')
 const effectiveDedupe = require('./dedupe').effective
 const { mappingSignature } = require('./strtodpt')
+const { execFile } = require('child_process')
+const { Silence, loadThresholds, cooldown, mode: silenceMode } = require('./silence')
+const { uplinkDown } = require('./uplink')
 
 // sites run one per worker thread (the default), or all in this thread with
 // the top-level `threads: false` in hamon.yml. A feature flag that can be
@@ -54,6 +57,7 @@ class InlineWorker extends EventEmitter {
         this.site = createSite(loc, data, {
             connected: () => this.emit('message', { connected: name }),
             gateway: (tunnelVersion) => this.emit('message', { gateway: name, tunnelVersion }),
+            alive: (lastData) => this.emit('message', { alive: name, lastData }),
             stopped: (reason, detail) => { this.emit('message', { stopped: name, reason, detail }); this.done() },
             timeout: () => { this.emit('message', name); this.done() },
             error: (err) => { this.emit('error', err); this.done() },
@@ -119,6 +123,8 @@ function reportSave(err) {
     saveFailed = err != null
 }
 function setState(name, state, extra = {}) {
+    // a held or disabled site isn't silent, it's stopped: its spell ends
+    if (silence != null && (state === 'disabled' || HELD.includes(state))) { silence.forget(name); delete lastSeen[name] }
     if (siteState == null) return
     siteState.set(name, state, { failures: failures[name] || 0, ...extra })
     saveState()
@@ -279,6 +285,8 @@ function start_worker(path, influxver, loc, survey, stack, dedupe) {
            everConnected.add(data.connected);
            delete lastBlocked[data.connected];
            setState(data.connected, 'connected');
+       } else if (data && data.alive) { // a minute report while connected
+           alive(data.alive, data.lastData);
        } else if (data && data.gateway) { // what the gateway offers, for hamon-upload
            if (siteState != null) { siteState.note(data.gateway, { tunnelVersion: data.tunnelVersion }); saveState(); }
        } else if (data && data.stopped) { // the worker stopped and says why
@@ -572,6 +580,83 @@ async function ConnectionService(firstrun, path, doc) {
     saveState();
   }
 }
+// ---- silence: connected but sending nothing (silence.js) ---------------------
+// set up in runService; the top-level `silence:` key in hamon.yml says
+// whether it only logs (report) or restarts (act)
+let silence = null
+let reinitSite = null // the kpipe restart, set up in runService
+const lastSeen = {}   // name -> the last telegram (ms) since hamon started, or its first connect
+const containerRestarted = {} // container -> when: two sites on one container restart it once
+
+// the running container on the hamon network with this IP ('' if none)
+function containerFor(ip, cb) {
+    execFile('docker', ['ps', '-q'], (err, out) => {
+        const ids = err ? [] : out.split(/\s+/).filter(Boolean)
+        if (ids.length === 0) return cb('')
+        execFile('docker', ['inspect', '-f', '{{.Name}} {{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}', ...ids], (err2, info) => {
+            const row = err2 ? null : info.split('\n').map((l) => l.trim().split(/\s+/)).find((f) => f.slice(1).includes(ip))
+            cb(row ? row[0].replace(/^\//, '') : '')
+        })
+    })
+}
+
+// what a silence restart does: a container site (dns 172.*) gets its
+// container restarted first (once a minute, for sites that share one), then
+// every site is re-initialised as by kpipe
+function silenceRestart(name, act, done) {
+    const loc = findLoc(name, originalDoc)
+    const dns = loc != null && loc.dns != null ? String(loc.dns) : ''
+    const reinit = () => { if (act && reinitSite != null) reinitSite(name) }
+    if (!dns.startsWith('172.')) { done('re-init'); return reinit() }
+    containerFor(dns, (cont) => {
+        if (cont === '') { done(`no container at ${dns} - re-init only`); return reinit() }
+        if (Date.now() - (containerRestarted[cont] || 0) < 60 * 1000) {
+            done(`container ${cont} restarted already - re-init only`); return reinit()
+        }
+        containerRestarted[cont] = Date.now()
+        if (!act) return done(`docker restart ${cont} + re-init`)
+        execFile('docker', ['restart', cont], (err) => {
+            done(err ? `docker restart ${cont} FAILED (${err.message.trim()}) - re-init only` : `docker restart ${cont} + re-init`)
+            setTimeout(reinit, err ? 0 : 10 * 1000) // let the VPN come up first
+        })
+    })
+}
+
+// a worker's minute report: the site's last telegram
+function alive(name, lastData) {
+    if (lastData != null && !(lastSeen[name] >= lastData)) lastSeen[name] = lastData
+    if (lastSeen[name] == null) lastSeen[name] = Date.now() // connected, nothing yet
+    const iso = (ms) => new Date(ms).toISOString()
+    if (siteState != null && lastData != null) { siteState.note(name, { lastData: iso(lastSeen[name]) }); saveState() }
+    const m = silenceMode(originalDoc)
+    if (m === 'off' || silence == null) return
+    const r = silence.check(name, lastSeen[name])
+    const tag = m === 'report' ? ' (report only)' : ''
+    if (r.do === 'restart') {
+        silenceRestart(name, m === 'act', (how) => {
+            const line = `Silent: ${name} no data for ${r.age}m (>= ${r.thresh}m), restart ${r.n}: ${how}${tag}`
+            console.log(line)
+            logger.warn(line)
+        })
+    } else if (r.do === 'hold' && r.first) {
+        const line = `Silent: ${name} no data for ${r.age}m (>= ${r.thresh}m), held - uplink down (${r.why})${tag}`
+        console.log(line)
+        logger.warn(line)
+    } else if (r.do === 'end') {
+        const line = `Silent: ${name} data again after ${r.minutes}m, ${r.restarts} restart(s)${tag}`
+        console.log(line)
+        logger.info(line)
+    }
+    // in the site's state for hamon-upload: { since, restarts, next, held }
+    const s = siteState != null ? siteState.get(name) : null
+    if (s == null) return
+    const sp = silence.spells[name]
+    const t = silence.thresholds()
+    let silent
+    if (sp != null) silent = { since: iso(sp.since), restarts: sp.n, next: t != null ? iso(sp.t + cooldown(t, sp.n) * 60000) : null }
+    if (r.do === 'hold') silent = { ...(silent || { since: iso(Date.now()), restarts: 0 }), held: 'uplink' }
+    if (silent !== undefined || s.silent !== undefined) { siteState.note(name, { silent }); saveState() }
+}
 
 let last_time = 0;
 let d = new Date().getTime();
@@ -613,6 +698,12 @@ async function runService(path, hamonConfig) {
             }
             return;
         }
+        reinit(ksite);
+    }
+
+    // "<site>" on the kpipe, and a silence restart: stop the site's worker and
+    // start it again at once
+    function reinit(ksite) {
         logger.info(`Looking to restart ${ksite}`);
         // we can call restart(site) but need to terminate first
         let oldLoc = findLoc(ksite, originalDoc);
@@ -677,6 +768,17 @@ async function runService(path, hamonConfig) {
   if (firstRun) {
     firstRun = false
     setThreads(getDoc(hamonConfig))
+    reinitSite = reinit
+    // the detector's thresholds file and netprobe's log; the uplink is read at
+    // most every 30s however many sites report
+    let uplinkAt = 0, uplinkWas = null
+    silence = new Silence({
+        thresholds: () => loadThresholds(path + 'freshness-thresholds.conf'),
+        uplink: () => {
+            if (Date.now() - uplinkAt > 30 * 1000) { uplinkAt = Date.now(); uplinkWas = uplinkDown(path + 'alerts/netprobe') }
+            return uplinkWas
+        },
+    })
     siteState = new SiteState(path + 'tmp/site-state.json');
     if (!siteState.load()) logger.info(`No site state from the last run - starting every enabled site`)
     originalDoc = getDoc(hamonConfig); // note so it availabe
@@ -686,5 +788,6 @@ async function runService(path, hamonConfig) {
 }
 
 module.exports.runService = runService
-// for test/crashbackoff.test.js
-module.exports._test = { noteCrash, backoffDelay, failures, watchDns }
+// for test/crashbackoff.test.js, backoffdns.test.js and silence.test.js
+module.exports._test = { noteCrash, backoffDelay, failures, watchDns, alive, lastSeen,
+    setSilence: (s, doc, state) => { silence = s; originalDoc = doc; siteState = state } }
