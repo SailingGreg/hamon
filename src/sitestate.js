@@ -113,6 +113,8 @@ class SiteState {
         if (old.tunnelVersion != null) s.tunnelVersion = old.tunnelVersion
         if (old.lastData != null && s.lastData == null) s.lastData = old.lastData
         if (old.firstConnected != null && s.firstConnected == null) s.firstConnected = old.firstConnected
+        // a silent spell outlives a reconnect or an ha-mon restart, not a hold
+        if (old.silent != null && s.silent == null && !HELD.includes(state) && state !== 'disabled') s.silent = old.silent
         if (state === 'connected') {
             const before = Date.parse(old.lastConnected)
             if (isNaN(before) || this.now().getTime() - before > NEW_AFTER_DAYS * 86400000) s.firstConnected = now

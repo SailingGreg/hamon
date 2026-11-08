@@ -214,6 +214,13 @@ console.log('silence.test.js: all checks passed')
         clock += 2 * MIN // stopped for 2 min
         const next = new SiteState(sf, { now: () => new Date(clock) })
         next.load()
+        next.set('carried', 'starting'); next.set('carried', 'connected') // as the new run starts its workers
+        next.set('nodata', 'starting'); next.set('nodata', 'connected')
+        assert.strictEqual(next.get('nodata').silent.restarts, 4, 'silent kept through starting/connected')
+        const held = new SiteState(path.join(sdir, 'held.json'))
+        held.set('h', 'connected'); held.note('h', { silent: { since: 'x', restarts: 1 } })
+        held.set('h', 'blocked', { reason: 'dns' })
+        assert.strictEqual(held.get('h').silent, undefined, 'a hold ends it')
         assert.strictEqual(next.downtime, 2 * MIN, 'downtime from the file')
         const sil2 = new Silence({ thresholds: () => t, now: () => clock })
         svc.setSilence(sil2, { silence: 'report', locations: [{ name: 'carried', dns: 'gw.example', enabled: true }, { name: 'nodata', dns: 'gw.example', enabled: true }] }, next)
