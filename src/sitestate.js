@@ -20,8 +20,9 @@
  * tell a current file from one left by a stopped ha-mon. tunnelVersion is the
  * gateway's own answer, kept across states: 2 = tunnelling v2, which offers TCP.
  * lastData (the last telegram, kept across states) and, while a connected site
- * is silent, `silent` ({ since, restarts, next, held, grace }) come from
- * service.js's silence check (silence.js). firstConnected is set when a site
+ * is silent, `silent` ({ since, restarts, next, held, grace, stopped }) come
+ * from service.js's silence check (silence.js); both carry the silence over an
+ * ha-mon restart. firstConnected is set when a site
  * connects with no connection on record, or none in NEW_AFTER_DAYS: while it is
  * recent the site is new, and its silence isn't acted on (the grace period).
  */
@@ -74,6 +75,7 @@ class SiteState {
         this.now = now
         this.pid = pid
         this.sites = {}
+        this.downtime = 0 // ms between the previous run's last save and load()
     }
 
     // the previous run's state; a missing or unreadable file starts empty
@@ -82,6 +84,8 @@ class SiteState {
             const doc = JSON.parse(fs.readFileSync(this.file, 'utf8'))
             if (doc && typeof doc.sites === 'object' && doc.sites !== null) {
                 this.sites = doc.sites
+                const updated = Date.parse(doc.updated)
+                this.downtime = isNaN(updated) ? 0 : Math.max(0, this.now().getTime() - updated)
                 return true
             }
         } catch (e) {

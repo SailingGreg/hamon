@@ -585,7 +585,7 @@ async function ConnectionService(firstrun, path, doc) {
 // whether it only logs (report) or restarts (act)
 let silence = null
 let reinitSite = null // the kpipe restart, set up in runService
-const lastSeen = {}   // name -> the last telegram (ms) since hamon started, or its first connect
+const lastSeen = {}   // name -> the last telegram (ms), carried over a restart (silenceFrom)
 const containerRestarted = {} // container -> when: two sites on one container restart it once
 
 // the running container on the hamon network with this IP ('' if none)
@@ -622,10 +622,35 @@ function silenceRestart(name, act, done) {
     })
 }
 
+// where a site's silence clock starts when this run first hears from it: its
+// last telegram on record, or for a site silent since before the last run
+// started, when that spell's threshold was reached less the threshold. The
+// time ha-mon was stopped doesn't count, so a quick restart neither resets
+// the clock nor makes a long stop look like silence. Its spell (restarts so
+// far) is carried over too
+const carried = new Set() // sites whose silence has been carried over this run
+function silenceFrom(name) {
+    const st = siteState != null ? siteState.get(name) : null
+    if (carried.has(name)) return Date.now() // re-enabled or unblocked: start afresh
+    carried.add(name)
+    const down = siteState != null ? siteState.downtime : 0
+    if (st != null && silence != null) silence.restore(name, st.silent, down)
+    let from = st != null && st.lastData ? Date.parse(st.lastData) : NaN
+    if (isNaN(from) && st != null && st.silent != null) {
+        const t = silence != null ? silence.thresholds() : null
+        const thresh = t == null ? 0 : (t.sites[name] != null ? t.sites[name] : t.default)
+        from = Date.parse(st.silent.since) - thresh * 60000
+    }
+    return isNaN(from) ? Date.now() : Math.min(from + down, Date.now())
+}
+
 // a worker's minute report: the site's last telegram
 function alive(name, lastData) {
+    if (lastSeen[name] == null) {
+        const from = silenceFrom(name) // carries the spell over too
+        lastSeen[name] = lastData != null ? lastData : from // a telegram this run is newer
+    }
     if (lastData != null && !(lastSeen[name] >= lastData)) lastSeen[name] = lastData
-    if (lastSeen[name] == null) lastSeen[name] = Date.now() // connected, nothing yet
     const iso = (ms) => new Date(ms).toISOString()
     if (siteState != null && lastData != null) { siteState.note(name, { lastData: iso(lastSeen[name]) }); saveState() }
     const m = silenceMode(originalDoc)
@@ -648,18 +673,23 @@ function alive(name, lastData) {
         const line = `Silent: ${name} no data for ${r.age}m (>= ${r.thresh}m), new site - not restarted until ${iso(r.until)}${tag}`
         console.log(line)
         logger.warn(line)
+    } else if (r.do === 'stop') {
+        const line = `Silent: ${name} no data for ${r.age}m (>= ${r.thresh}m), ${r.n} restarts haven't helped - no more until data (bus quiet or dead at the site?)${tag}`
+        console.log(line)
+        logger.warn(line)
     } else if (r.do === 'end') {
         const line = `Silent: ${name} data again after ${r.minutes}m, ${r.restarts} restart(s)${tag}`
         console.log(line)
         logger.info(line)
     }
-    // in the site's state for hamon-upload: { since, restarts, next, held }
+    // in the site's state for hamon-upload: { since, restarts, next, held, stopped }
     const s = siteState != null ? siteState.get(name) : null
     if (s == null) return
     const sp = silence.spells[name]
     const t = silence.thresholds()
     let silent
     if (sp != null) silent = { since: iso(sp.since), restarts: sp.n, next: t != null ? iso(sp.t + cooldown(t, sp.n) * 60000) : null }
+    if (sp != null && sp.stopped) silent = { since: iso(sp.since), restarts: sp.n, stopped: true }
     if (r.do === 'hold') silent = { ...(silent || { since: iso(r.since), restarts: 0 }), held: 'uplink' }
     if (r.do === 'grace') silent = { since: iso(r.since), restarts: 0, grace: iso(r.until) }
     if (silent !== undefined || s.silent !== undefined) { siteState.note(name, { silent }); saveState() }

@@ -31,6 +31,7 @@
 #       cooldown_max  ... up to this cap
 #     Optional reserved key:
 #       grace         new-site grace period (default 1440 = 24h, 0 = off)
+#       max_restarts  read by hamon's silence check only (silence.js)
 #     Any other key is a location (case-exact, as in Influx) whose threshold
 #     overrides `default` - for low-traffic sites with long normal quiet spells.
 #   * Grace: a site whose first knx2 point (within FIRST_LOOKBACK) is younger
@@ -211,6 +212,7 @@ if [ -f "$THRESH_FILE" ]; then
     fi
     case "$key" in
       default|cooldown|cooldown_max|grace) CONF["$key"]="$mins" ;;
+      max_restarts) ;;   # hamon's silence check (silence.js), not the detector's
       *) SITE_THRESH["$key"]="$mins" ;;
     esac
   done < "$THRESH_FILE"

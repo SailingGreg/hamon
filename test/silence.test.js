@@ -18,7 +18,9 @@ fs.writeFileSync(conf, '# comment\ndefault 20\ncooldown 20\ncooldown_max 240\ngr
 
 // thresholds file
 const t = loadThresholds(conf)
-assert.deepStrictEqual(t, { default: 20, cooldown: 20, cooldownMax: 240, grace: 1440, sites: { quietsite: 720 } })
+assert.deepStrictEqual(t, { default: 20, cooldown: 20, cooldownMax: 240, grace: 1440, maxRestarts: 6, sites: { quietsite: 720 } })
+fs.writeFileSync(path.join(dir, 'max'), 'default 20\ncooldown 20\ncooldown_max 240\nmax_restarts 3\n')
+assert.deepStrictEqual([loadThresholds(path.join(dir, 'max')).maxRestarts, loadThresholds(path.join(dir, 'max')).sites], [3, {}], 'max_restarts is not a site')
 fs.writeFileSync(path.join(dir, 'nograce'), 'default 20\ncooldown 20\ncooldown_max 240\n')
 assert.strictEqual(loadThresholds(path.join(dir, 'nograce')).grace, 1440, 'grace defaults to 24 h')
 assert.strictEqual(loadThresholds(path.join(dir, 'none')), null)
@@ -83,6 +85,42 @@ assert.strictEqual(new Silence({ thresholds: () => null }).check('site', 0).do, 
     assert.strictEqual(g.spells.new, undefined, 'no spell in grace')
     assert.strictEqual(chk(1440, 0).do, 'restart', 'grace over: restart')
     assert.strictEqual(new Silence({ thresholds: () => t, now: () => 30 * MIN }).check('old', 0, null).do, 'restart', 'no firstConnected on record: an established site')
+}
+
+// max_restarts: after the last restart's cooldown, stop until data (logged once)
+{
+    let mnow = 0
+    const t3 = { ...t, maxRestarts: 3 }
+    const m = new Silence({ thresholds: () => t3, now: () => mnow })
+    const chk = (min, last = 0) => { mnow = min * MIN; return m.check('dead', last * MIN) }
+    assert.deepStrictEqual([chk(20).n, chk(40).n, chk(80).n], [1, 2, 3], 'three restarts')
+    assert.strictEqual(chk(159).do, 'wait', 'the third restart gets its cooldown')
+    let r = chk(160)
+    assert.deepStrictEqual([r.do, r.n], ['stop', 3], 'then stop')
+    assert.strictEqual(chk(400).do, 'stopped', 'logged once, no more restarts')
+    assert.strictEqual(chk(2000).do, 'stopped', 'even past cooldown_max')
+    r = chk(2001, 2000)
+    assert.deepStrictEqual([r.do, r.restarts], ['end', 3], 'data again ends it')
+    assert.deepStrictEqual([chk(2020, 2000).do, m.spells.dead.n], ['restart', 1], 'next spell starts over')
+    const u = new Silence({ thresholds: () => ({ ...t, maxRestarts: 0 }), now: () => 100000 * MIN })
+    u.spells.x = { n: 50, t: 0, since: 0 }
+    assert.strictEqual(u.check('x', 0).do, 'restart', '0 never stops')
+}
+
+// restore: a spell carried over an ha-mon restart, downtime not counted
+{
+    let rnow = 1000 * MIN
+    const g = new Silence({ thresholds: () => t, now: () => rnow })
+    g.restore('site', { since: new Date(500 * MIN).toISOString(), restarts: 2, next: new Date(1030 * MIN).toISOString() }, 5 * MIN)
+    assert.deepStrictEqual(g.spells.site, { n: 2, t: 995 * MIN, since: 505 * MIN, stopped: false }, 'last restart = next - cooldown, shifted by downtime')
+    g.restore('site', { since: new Date(0).toISOString(), restarts: 9 })
+    assert.strictEqual(g.spells.site.n, 2, 'an existing spell is kept')
+    g.restore('held', { since: new Date(0).toISOString(), restarts: 0, held: 'uplink' })
+    assert.strictEqual(g.spells.held, undefined, 'no restarts yet: nothing to carry')
+    g.restore('stopped', { since: new Date(0).toISOString(), restarts: 6, stopped: true })
+    assert.strictEqual(g.check('stopped', 0).do, 'stopped', 'stopped stays stopped')
+    rnow = 1035 * MIN
+    assert.deepStrictEqual([g.check('site', 0).do, g.spells.site.n], ['restart', 3], 'carried spell goes on to restart 3')
 }
 
 // uplink rule, replayed on lines from 2026-11-04 (netprobe local time)
@@ -164,6 +202,42 @@ console.log('silence.test.js: all checks passed')
         svc.alive('fresh', null)
         assert.ok(/^Silent: fresh no data for 25m \(>= 20m\), new site - not restarted until \S+ \(report only\)$/.test(out.pop()), 'grace line')
         assert.ok(st2.get('fresh').silent.grace, 'grace in the state')
+        // an ha-mon restart: the silence clock and spell carry over, minus the downtime
+        const sf = path.join(sdir, 'carry.json')
+        const prev = new SiteState(sf, { now: () => new Date(clock) })
+        prev.set('carried', 'connected'); delete prev.sites.carried.firstConnected
+        prev.note('carried', { lastData: new Date(clock - 30 * MIN).toISOString(),
+                               silent: { since: new Date(clock - 10 * MIN).toISOString(), restarts: 1, next: new Date(clock + 10 * MIN).toISOString() } })
+        prev.set('nodata', 'connected'); delete prev.sites.nodata.firstConnected
+        prev.note('nodata', { silent: { since: new Date(clock - 600 * MIN).toISOString(), restarts: 4, next: new Date(clock + 100 * MIN).toISOString() } })
+        prev.save(false)
+        clock += 2 * MIN // stopped for 2 min
+        const next = new SiteState(sf, { now: () => new Date(clock) })
+        next.load()
+        assert.strictEqual(next.downtime, 2 * MIN, 'downtime from the file')
+        const sil2 = new Silence({ thresholds: () => t, now: () => clock })
+        svc.setSilence(sil2, { silence: 'report', locations: [{ name: 'carried', dns: 'gw.example', enabled: true }, { name: 'nodata', dns: 'gw.example', enabled: true }] }, next)
+        clock += MIN
+        svc.alive('carried', null)
+        assert.strictEqual(svc.lastSeen.carried, clock - 3 * MIN - 30 * MIN + 2 * MIN, 'clock from lastData, downtime left out')
+        assert.strictEqual(sil2.spells.carried.n, 1, 'spell carried')
+        assert.strictEqual(out.length, 0, 'still in its cooldown: nothing logged')
+        svc.alive('nodata', null)
+        assert.strictEqual(svc.lastSeen.nodata, clock - 3 * MIN - 600 * MIN - 20 * MIN + 2 * MIN, 'no lastData: spell start less the threshold')
+        assert.strictEqual(sil2.spells.nodata.n, 4)
+        clock += 100 * MIN
+        svc.alive('nodata', null)
+        assert.ok(/^Silent: nodata no data for \d+m \(>= 20m\), restart 5: re-init \(report only\)$/.test(out.pop()), 'restart 5, not 1')
+        clock += 240 * MIN
+        svc.alive('nodata', null)
+        assert.ok(/^Silent: nodata no data for \d+m \(>= 20m\), restart 6: re-init/.test(out.pop()), 'restart 6')
+        clock += 240 * MIN
+        svc.alive('nodata', null)
+        assert.ok(/^Silent: nodata no data for \d+m \(>= 20m\), 6 restarts haven't helped - no more until data/.test(out.pop()), `stop line`)
+        assert.deepStrictEqual(next.get('nodata').silent.stopped, true, 'stopped in the state')
+        clock += 240 * MIN
+        svc.alive('nodata', null)
+        assert.strictEqual(out.length, 0, 'stopped: logged once')
         svc.setSilence(sil, { locations: [] }, state) // off: nothing logged
         clock += 60 * MIN
         svc.alive('direct', null)
