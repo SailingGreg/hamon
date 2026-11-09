@@ -684,7 +684,8 @@ function downRetry(name) {
     downRestarts[name] = n + 1
     restartContainer(siteDns(name), act, (how, wait) => {
         say(`container restart ${n + 1}: ${how}`)
-        if (act) setTimeout(() => restartSite(name), wait ? CONTAINER_UP : 0)
+        // as a back-off timer, so a kpipe restart or config change meanwhile cancels it
+        if (act) pending[name] = setTimeout(() => { delete pending[name]; restartSite(name) }, wait ? CONTAINER_UP : 0)
     })
     return act
 }

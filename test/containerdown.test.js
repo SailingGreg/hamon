@@ -56,7 +56,7 @@ let checks = 0
         fail('box', 3)
         assert.deepStrictEqual([restarted.length, calls.length], [3, 0], 'first three: plain restarts'); checks++
         fail('box', 1)
-        assert.strictEqual(pendingMins('box'), null, 'no back-off wait: the container goes now'); checks++
+        assert.ok(!(pendingMins('box') >= 1), 'no back-off wait: the container goes now'); checks++
         await wait(30)
         assert.ok(calls.includes('restart vpnbox'), 'docker restart'); checks++
         assert.deepStrictEqual(restarted, ['box', 'box', 'box', 'box'], 'then the site, after the VPN wait'); checks++
@@ -82,6 +82,17 @@ let checks = 0
         assert.ok(/container restart 1: container vpnbox restarted already$/.test(out.pop())); checks++
         assert.deepStrictEqual(restarted.slice(3), ['box2'], 'site still restarted'); checks++
         reset('box2')
+
+        // a kpipe restart while the VPN comes up cancels the delayed site restart
+        svc.setContainerUp(50)
+        fail('box', 4)
+        await wait(10)
+        assert.ok(svc.pending.box != null, 'site restart waits as a pending timer'); checks++
+        svc.cancelPending('box')
+        await wait(60)
+        assert.deepStrictEqual(restarted.filter((n) => n === 'box').length, 3, 'cancelled: no second worker'); checks++
+        svc.setContainerUp(5)
+        reset('box')
 
         // no container at the IP: retried at once, logged
         fail('gone', 4)
