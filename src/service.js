@@ -728,8 +728,10 @@ function silenceFrom(name) {
 
 // a worker's minute report: the site's last telegram
 function alive(name, lastData) {
+    let prev = lastSeen[name] // the telegram before this report's: the gap if data is back
     if (lastSeen[name] == null) {
         const from = silenceFrom(name) // carries the spell over too
+        prev = from
         lastSeen[name] = lastData != null ? lastData : from // a telegram this run is newer
     }
     if (lastData != null && !(lastSeen[name] >= lastData)) lastSeen[name] = lastData
@@ -760,7 +762,9 @@ function alive(name, lastData) {
         console.log(line)
         logger.warn(line)
     } else if (r.do === 'end') {
-        const line = `Silent: ${name} data again after ${r.minutes}m, ${r.restarts} restart(s)${tag}`
+        // the real gap in the data, then how long the site had been counted silent
+        const gap = lastData != null && prev != null ? `after a ${Math.round((lastData - prev) / 60000)}m gap ` : ''
+        const line = `Silent: ${name} data again ${gap}(${r.minutes}m past the threshold), ${r.restarts} restart(s)${tag}`
         console.log(line)
         logger.info(line)
     }

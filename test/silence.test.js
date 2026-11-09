@@ -179,7 +179,7 @@ console.log('silence.test.js: all checks passed')
         assert.strictEqual(svc.lastSeen.direct, t0, 'a null report keeps the last telegram')
         clock += 1 * MIN
         svc.alive('direct', clock)           // data again
-        assert.ok(/^Silent: direct data again after 1m, 1 restart\(s\) \(report only\)$/.test(out.pop()), `end line`)
+        assert.ok(/^Silent: direct data again after a 26m gap \(1m past the threshold\), 1 restart\(s\) \(report only\)$/.test(out.pop()), `end line`)
         assert.strictEqual(state.get('direct').silent, undefined, 'silent cleared')
         state.set('direct', 'starting')
         assert.strictEqual(state.get('direct').lastData, new Date(clock).toISOString(), 'lastData kept across states')
