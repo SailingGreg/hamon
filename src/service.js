@@ -281,6 +281,7 @@ function start_worker(path, influxver, loc, survey, stack, dedupe) {
     })
     worker.on('message', (data) => {
        if (data && data.connected) { // KNX link up - clear the back-off
+           downConnected(data.connected);
            failures[data.connected] = 0;
            everConnected.add(data.connected);
            delete lastBlocked[data.connected];
@@ -341,11 +342,16 @@ function compareLoc(oldLoc, newLoc, oldStack, newStack) {
 // worker asked to be restarted - apply back-off if it keeps failing
 function requestRestart(name) {
     failures[name] = (failures[name] || 0) + 1;
-    const delay = backoffDelay(failures[name]);
+    if (failures[name] === 1 && containerMode(name) !== 'off') downSince[name] = Date.now();
+    let delay = backoffDelay(failures[name]);
     if (delay == 0) {
-        restart(name);
+        restartSite(name);
         return;
     }
+    // a container site going into back-off: its container is restarted now
+    if (failures[name] === RESTART_FREE + 1 && downRetry(name)) return;
+    // ... and its later retries run a step behind (15, 30 ... 240 min after it)
+    if (failures[name] > RESTART_FREE + 1 && containerMode(name) === 'act') delay = backoffDelay(failures[name] - 1);
     logger.info(`Back-off: ${name} restart ${failures[name]} in ${delay / 60000}min`)
     scheduleRestart(name, delay);
 }
@@ -372,7 +378,7 @@ function scheduleRestart(name, delay) {
         // the config may have changed while waiting
         const loc = findLoc(name, originalDoc);
         if (loc != null && loc["enabled"] == true) {
-            restart(name);
+            if (!downRetry(name)) restartSite(name); // a container site: its container first
         } else {
             logger.info(`Back-off: ${name} no longer enabled, not restarting`)
             setState(name, 'disabled');
@@ -588,38 +594,114 @@ let reinitSite = null // the kpipe restart, set up in runService
 const lastSeen = {}   // name -> the last telegram (ms), carried over a restart (silenceFrom)
 const containerRestarted = {} // container -> when: two sites on one container restart it once
 
+let docker = (args, cb) => execFile('docker', args, cb) // replaced in tests
+let CONTAINER_UP = 10 * 1000 // after a container restart, for its VPN to come up
+
+// a site's dns, '' if none: a container site's is its container's IP (172.*)
+function siteDns(name) {
+    const loc = findLoc(name, originalDoc)
+    return loc != null && loc.dns != null ? String(loc.dns) : ''
+}
+
 // the running container on the hamon network with this IP ('' if none)
 function containerFor(ip, cb) {
-    execFile('docker', ['ps', '-q'], (err, out) => {
+    docker(['ps', '-q'], (err, out) => {
         const ids = err ? [] : out.split(/\s+/).filter(Boolean)
         if (ids.length === 0) return cb('')
-        execFile('docker', ['inspect', '-f', '{{.Name}} {{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}', ...ids], (err2, info) => {
+        docker(['inspect', '-f', '{{.Name}} {{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}', ...ids], (err2, info) => {
             const row = err2 ? null : info.split('\n').map((l) => l.trim().split(/\s+/)).find((f) => f.slice(1).includes(ip))
             cb(row ? row[0].replace(/^\//, '') : '')
         })
     })
 }
 
-// what a silence restart does: a container site (dns 172.*) gets its
-// container restarted first (once a minute, for sites that share one), then
-// every site is re-initialised as by kpipe
-function silenceRestart(name, act, done) {
-    const loc = findLoc(name, originalDoc)
-    const dns = loc != null && loc.dns != null ? String(loc.dns) : ''
-    const reinit = () => { if (act && reinitSite != null) reinitSite(name) }
-    if (!dns.startsWith('172.')) { done('re-init'); return reinit() }
-    containerFor(dns, (cont) => {
-        if (cont === '') { done(`no container at ${dns} - re-init only`); return reinit() }
-        if (Date.now() - (containerRestarted[cont] || 0) < 60 * 1000) {
-            done(`container ${cont} restarted already - re-init only`); return reinit()
-        }
+// restart the container holding ip, at most once a minute (sites can share
+// one); report mode only says what it would do. done(how, wait): wait is true
+// when the container has just been (or is being) restarted
+function restartContainer(ip, act, done) {
+    containerFor(ip, (cont) => {
+        if (cont === '') return done(`no container at ${ip}`, false)
+        if (Date.now() - (containerRestarted[cont] || 0) < 60 * 1000) return done(`container ${cont} restarted already`, act)
         containerRestarted[cont] = Date.now()
-        if (!act) return done(`docker restart ${cont} + re-init`)
-        execFile('docker', ['restart', cont], (err) => {
-            done(err ? `docker restart ${cont} FAILED (${err.message.trim()}) - re-init only` : `docker restart ${cont} + re-init`)
-            setTimeout(reinit, err ? 0 : 10 * 1000) // let the VPN come up first
+        if (!act) return done(`docker restart ${cont}`, false)
+        docker(['restart', cont], (err) => {
+            done(err ? `docker restart ${cont} FAILED (${err.message.trim()})` : `docker restart ${cont}`, !err)
         })
     })
+}
+
+// what a silence restart does: a container site (dns 172.*) gets its
+// container restarted first, then every site is re-initialised as by kpipe
+function silenceRestart(name, act, done) {
+    const dns = siteDns(name)
+    const reinit = () => { if (act && reinitSite != null) reinitSite(name) }
+    if (!dns.startsWith('172.')) { done('re-init'); return reinit() }
+    restartContainer(dns, act, (how) => {
+        const did = /^docker restart \S+$/.test(how) // restarted, or would have in report mode
+        done(did ? `${how} + re-init` : `${how} - re-init only`)
+        setTimeout(reinit, did && act ? CONTAINER_UP : 0) // let the VPN come up first
+    })
+}
+
+// ---- container sites that stay down (step 3 of docs/site-states.md) ---------
+// a container site (dns 172.*) whose link keeps failing has its container
+// restarted as it goes into the back-off - a lost VPN path only comes back
+// that way - and again at each back-off retry, which for these sites runs a
+// step behind (15, 30 ... 240 min). Not while the uplink is down, at most
+// max_restarts until the site connects, and only logged in `silence: report`
+const downRestarts = {} // name -> container restarts since it last connected
+const downSince = {}    // name -> its first failure since it last connected (ms)
+const downCapped = new Set() // sites that reached max_restarts (logged once)
+let restartSite = (name) => restart(name) // replaced in tests
+
+// 'off' | 'report' | 'act' for a container site, 'off' for any other
+function containerMode(name) {
+    if (silence == null || !siteDns(name).startsWith('172.')) return 'off'
+    return silenceMode(originalDoc)
+}
+
+// a back-off retry for a site: a container site restarts its container, then
+// the site once the VPN is up. True when that's under way (act mode), false
+// when the caller restarts the site as before
+function downRetry(name) {
+    const m = containerMode(name)
+    if (m === 'off') return false
+    const act = m === 'act'
+    const say = (how, warn = true) => {
+        const line = `Back-off: ${name} down, ${how}${act ? '' : ' (report only)'}`
+        console.log(line)
+        if (warn) logger.warn(line); else logger.info(line)
+    }
+    const t = silence.thresholds()
+    const max = t != null ? t.maxRestarts : 6
+    const n = downRestarts[name] || 0
+    if (max > 0 && n >= max) {
+        if (!downCapped.has(name)) { downCapped.add(name); say(`${max} container restarts haven't helped - plain retries until it connects`) }
+        return false
+    }
+    const up = silence.uplink()
+    if (up != null) { say(`container restart held - uplink down (${up})`, false); return false }
+    downRestarts[name] = n + 1
+    restartContainer(siteDns(name), act, (how, wait) => {
+        say(`container restart ${n + 1}: ${how}`)
+        if (act) setTimeout(() => restartSite(name), wait ? CONTAINER_UP : 0)
+    })
+    return act
+}
+
+// a site connected: how long a container site was down, and whether its
+// container restarts went with it
+function downConnected(name) {
+    if (downSince[name] != null && (failures[name] || 0) > RESTART_FREE) {
+        const mins = Math.round((Date.now() - downSince[name]) / 60000)
+        const line = `Back-off: ${name} connected again after ${mins}m down, ${downRestarts[name] || 0} container restart(s)`
+            + (containerMode(name) === 'report' ? ' (report only)' : '')
+        console.log(line)
+        logger.info(line)
+    }
+    delete downSince[name]
+    delete downRestarts[name]
+    downCapped.delete(name)
 }
 
 // where a site's silence clock starts when this run first hears from it: its
@@ -827,4 +909,6 @@ async function runService(path, hamonConfig) {
 module.exports.runService = runService
 // for test/crashbackoff.test.js, backoffdns.test.js and silence.test.js
 module.exports._test = { noteCrash, backoffDelay, failures, watchDns, alive, lastSeen,
+    requestRestart, downConnected, downRestarts, pending, cancelPending,
+    setDocker: (fn) => { docker = fn }, setContainerUp: (ms) => { CONTAINER_UP = ms }, setRestartSite: (fn) => { restartSite = fn },
     setSilence: (s, doc, state) => { silence = s; originalDoc = doc; siteState = state } }
