@@ -265,6 +265,9 @@ function start_worker(path, influxver, loc, survey, stack, dedupe) {
                    precheck: needsPrecheck(siteState != null ? siteState.get(loc.name) : null),
                    failures: failures[loc.name] || 0,
                    survey: survey === true, // top-level `survey: true` in hamon.yml
+                   // top-level `datasecure_log: true` (debug): log each Data Secure
+                   // telegram decrypted; read at the site's start (kpipe applies it)
+                   datasecureLog: originalDoc != null && originalDoc.datasecure_log === true,
                    stack: effectiveStack(loc.stack, stack), // top-level, else site's, else knx
                    dedupe: effectiveDedupe(loc.dedupe, dedupe), // ms: site's, else top-level, else 0 (off)
                    siblings: siblingsOf(loc) }

@@ -340,6 +340,7 @@ function createSite(location, opts, hooks) {
             secure: secureTunnel,   // knxultimate only; undefined = plain tunnelling
             transport: tcp ? 'tcp' : undefined,   // knxultimate only: tunnel over TCP (KNXnet/IP tunnelling v2)
             dataSecure,             // knxultimate only: group keys for a plain tunnel
+            dataSecureLog: opts.datasecureLog === true, // debug: log each decrypt
             loglevel: quietRetries ? 'error' : logging,
             handlers: {
                 connected: guard(function () {

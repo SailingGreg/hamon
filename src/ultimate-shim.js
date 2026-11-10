@@ -321,6 +321,11 @@ class UltimateConnection extends EventEmitter {
         if (isSecured(cemi)) {
             const r = this.dataSecure ? this.dataSecure.open(cemi) : { drop: 'no key' }
             if (r !== 'decrypted') return this.securedDropped(cemi, r.drop)
+            // `datasecure_log: true` in hamon.yml: proof a telegram arrived secured
+            if (this.options.dataSecureLog) {
+                this.log.info('DATASECURE decrypted %s from %s, seq %s', cemi.dstAddress.toString(),
+                              cemi.srcAddress.toString(), String(this.dataSecure.opened))
+            }
         }
 
         const npdu = cemi.npdu
