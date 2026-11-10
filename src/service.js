@@ -58,6 +58,7 @@ class InlineWorker extends EventEmitter {
             connected: () => this.emit('message', { connected: name }),
             gateway: (tunnelVersion) => this.emit('message', { gateway: name, tunnelVersion }),
             alive: (lastData) => this.emit('message', { alive: name, lastData }),
+            lost: () => this.emit('message', { lost: name }),
             stopped: (reason, detail) => { this.emit('message', { stopped: name, reason, detail }); this.done() },
             timeout: () => { this.emit('message', name); this.done() },
             error: (err) => { this.emit('error', err); this.done() },
@@ -285,9 +286,12 @@ function start_worker(path, influxver, loc, survey, stack, dedupe) {
            failures[data.connected] = 0;
            everConnected.add(data.connected);
            delete lastBlocked[data.connected];
+           if (siteState != null) siteState.note(data.connected, { linkLost: undefined });
            setState(data.connected, 'connected');
        } else if (data && data.alive) { // a minute report while connected
            alive(data.alive, data.lastData);
+       } else if (data && data.lost) { // the link went down; the stack retries
+           linkLost(data.lost);
        } else if (data && data.gateway) { // what the gateway offers, for hamon-upload
            if (siteState != null) { siteState.note(data.gateway, { tunnelVersion: data.tunnelVersion }); saveState(); }
        } else if (data && data.stopped) { // the worker stopped and says why
@@ -727,6 +731,14 @@ function silenceFrom(name) {
     return isNaN(from) ? Date.now() : Math.min(from + down, Date.now())
 }
 
+// the link went down while the worker retries: `linkLost` (when) in the state
+// file, through any restarts, until the site connects again
+function linkLost(name) {
+    if (siteState == null) return
+    siteState.note(name, { linkLost: new Date().toISOString() })
+    saveState()
+}
+
 // a worker's minute report: the site's last telegram
 function alive(name, lastData) {
     let prev = lastSeen[name] // the telegram before this report's: the gap if data is back
@@ -745,8 +757,10 @@ function alive(name, lastData) {
     const r = silence.check(name, lastSeen[name], first)
     const tag = m === 'report' ? ' (report only)' : ''
     if (r.do === 'restart') {
+        const lost = st != null && st.linkLost ? Date.parse(st.linkLost) : NaN
+        const link = isNaN(lost) ? '' : `, link lost ${Math.round((Date.now() - lost) / 60000)}m ago`
         silenceRestart(name, m === 'act', (how) => {
-            const line = `Silent: ${name} no data for ${r.age}m (>= ${r.thresh}m), restart ${r.n}: ${how}${tag}`
+            const line = `Silent: ${name} no data for ${r.age}m (>= ${r.thresh}m)${link}, restart ${r.n}: ${how}${tag}`
             console.log(line)
             logger.warn(line)
         })
@@ -914,6 +928,6 @@ async function runService(path, hamonConfig) {
 module.exports.runService = runService
 // for test/crashbackoff.test.js, backoffdns.test.js and silence.test.js
 module.exports._test = { noteCrash, backoffDelay, failures, watchDns, alive, lastSeen,
-    requestRestart, downConnected, downRestarts, pending, cancelPending,
+    requestRestart, downConnected, downRestarts, pending, cancelPending, linkLost,
     setDocker: (fn) => { docker = fn }, setContainerUp: (ms) => { CONTAINER_UP = ms }, setRestartSite: (fn) => { restartSite = fn },
     setSilence: (s, doc, state) => { silence = s; originalDoc = doc; siteState = state } }

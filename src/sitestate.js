@@ -115,6 +115,8 @@ class SiteState {
         if (old.firstConnected != null && s.firstConnected == null) s.firstConnected = old.firstConnected
         // a silent spell outlives a reconnect or an ha-mon restart, not a hold
         if (old.silent != null && s.silent == null && !HELD.includes(state) && state !== 'disabled') s.silent = old.silent
+        // so does a lost link, until the site connects again
+        if (old.linkLost != null && s.linkLost == null && !HELD.includes(state) && state !== 'disabled' && state !== 'connected') s.linkLost = old.linkLost
         if (state === 'connected') {
             const before = Date.parse(old.lastConnected)
             if (isNaN(before) || this.now().getTime() - before > NEW_AFTER_DAYS * 86400000) s.firstConnected = now
