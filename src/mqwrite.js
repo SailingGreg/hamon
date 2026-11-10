@@ -15,8 +15,11 @@ const gadRegExp = new RegExp(
 
 // one client per site, returned to the caller (site.js), which passes it to
 // mqdisconnect() - sites may share this module in one thread, so it logs
-// through the site's logger (log)
-function MQTTconnect(groupAddresses, connection, location, log = logger.siteLogger(location?.name)) {
+// through the site's logger (log). secured: the GAs with a Data Secure key on a
+// plain tunnel - hamon can't send secured telegrams (no sender sequence, and
+// its address isn't in the devices' security tables), and the devices ignore
+// a plain one, so a write, on/off or read to them is refused and logged
+function MQTTconnect(groupAddresses, connection, location, log = logger.siteLogger(location?.name), secured = new Set()) {
   const mqttClient = mqtt.connect(MQTTBROKERIP)
 
     mqttClient.on('connect', function () {
@@ -37,7 +40,10 @@ function MQTTconnect(groupAddresses, connection, location, log = logger.siteLogg
       let gad = gadArray[2] + '/' + gadArray[3] + '/' + gadArray[4]
       let cmd = gadArray[6]
 
-      if (groupAddresses.hasOwnProperty(gad)) {
+      if (Object.hasOwn(groupAddresses, gad) && secured.has(gad)) {
+        log.error('Ignoring %s to %s: a Data Secure GA - hamon can\'t send secured telegrams (needs Data Secure sending and hamon as a sender in ETS)',
+                  cmd || 'command', gad)
+      } else if (Object.hasOwn(groupAddresses, gad)) {
 
         // parse the payload into the value this GAD's DPT expects
         let value = parsePayload(groupAddresses[gad].dpt, msg)

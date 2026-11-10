@@ -365,7 +365,8 @@ function createSite(location, opts, hooks) {
                         inited = true
                         initDatapoints()
                         // and then connect to MQTT
-                        mqttClient = MQTTconnect(groupAddresses, connection, location, log)
+                        // Data Secure GAs on a plain tunnel: writes refused (mqwrite.js)
+                        mqttClient = MQTTconnect(groupAddresses, connection, location, log, new Set(Object.keys(dataSecure || {})))
                     }
                 }),
                 // on event we get src/dest/value
