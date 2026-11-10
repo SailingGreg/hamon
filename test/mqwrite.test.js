@@ -2,7 +2,7 @@
 /*
  * mqwrite.test.js - MQTT commands to a site (mqwrite.js): a Data Secure GA on
  * a plain tunnel refuses write, on/off and read (logged, no action written to
- * Influx); other GAs still write.
+ * Influx); other GAs still write. A hyphenated site name matches the topic.
  */
 const assert = require('assert')
 const EventEmitter = require('events')
@@ -32,5 +32,10 @@ assert.ok(/Data Secure GA/.test(lines[0][0]) && lines[0][1] === 'write' && lines
 msg('knx/sitea/1/1/1/write', 'true')
 assert.deepStrictEqual(sent, [['write', true]], 'plain GA: written'); checks++
 assert.strictEqual(actions.length, 1, 'plain GA: action logged'); checks++
+// a hyphenated site name: its topics match too
+sent.length = 0
+MQTTconnect(groupAddresses, null, { name: 'site-b', influxver: 2 }, log, new Set())
+msg('knx/site-b/1/1/1/write', 'false')
+assert.deepStrictEqual(sent, [['write', false]], 'hyphenated site: written'); checks++
 console.log(`mqwrite: ${checks} checks passed`)
 process.exit(0)

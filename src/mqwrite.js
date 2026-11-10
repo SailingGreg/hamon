@@ -9,8 +9,9 @@ const { dptMain } = require('./dptnames')
 const MQTTBROKERIP = 'mqtt://localhost' // needs protocol which is mqtt
 //const MQTTBROKERPORT = 1883 // default
 const topicPrefix = '' || 'knx'
+// knx/<site>/<main>/<middle>/<sub>[/<cmd>]; site names may have - as well as \w
 const gadRegExp = new RegExp(
-  topicPrefix + '/(\\w+)/(\\d+)/(\\d+)/(\\d+)(/([\\w\\d]+))?'
+  topicPrefix + '/([\\w-]+)/(\\d+)/(\\d+)/(\\d+)(/([\\w\\d]+))?'
 )
 
 // one client per site, returned to the caller (site.js), which passes it to
