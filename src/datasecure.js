@@ -86,6 +86,7 @@ class DataSecure {
         const last = this.lastSeq.get(src)
         if (last !== undefined && n <= last) return { drop: 'replay' }
         this.lastSeq.set(src, n)
+        this.opened = n // the sequence number of the telegram just decrypted
         // the plain APDU: TPCI/APCI high bits, APCI low byte (with a 6-bit
         // value), then any data bytes
         npdu.tpci = payload.length > 0 ? payload[0] & 0x03 : 0

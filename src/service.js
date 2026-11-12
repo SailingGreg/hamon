@@ -15,6 +15,9 @@ const effectiveStack = require('./knxstack').effective
 const { SiteState, fingerprint, needsPrecheck, CHANGE_FIELDS, HELD } = require('./sitestate')
 const effectiveDedupe = require('./dedupe').effective
 const { mappingSignature } = require('./strtodpt')
+const { execFile } = require('child_process')
+const { Silence, loadThresholds, cooldown, mode: silenceMode } = require('./silence')
+const { uplinkDown } = require('./uplink')
 
 // sites run one per worker thread (the default), or all in this thread with
 // the top-level `threads: false` in hamon.yml. A feature flag that can be
@@ -54,6 +57,8 @@ class InlineWorker extends EventEmitter {
         this.site = createSite(loc, data, {
             connected: () => this.emit('message', { connected: name }),
             gateway: (tunnelVersion) => this.emit('message', { gateway: name, tunnelVersion }),
+            alive: (lastData) => this.emit('message', { alive: name, lastData }),
+            lost: () => this.emit('message', { lost: name }),
             stopped: (reason, detail) => { this.emit('message', { stopped: name, reason, detail }); this.done() },
             timeout: () => { this.emit('message', name); this.done() },
             error: (err) => { this.emit('error', err); this.done() },
@@ -119,6 +124,8 @@ function reportSave(err) {
     saveFailed = err != null
 }
 function setState(name, state, extra = {}) {
+    // a held or disabled site isn't silent, it's stopped: its spell ends
+    if (silence != null && (state === 'disabled' || HELD.includes(state))) { silence.forget(name); delete lastSeen[name] }
     if (siteState == null) return
     siteState.set(name, state, { failures: failures[name] || 0, ...extra })
     saveState()
@@ -258,6 +265,9 @@ function start_worker(path, influxver, loc, survey, stack, dedupe) {
                    precheck: needsPrecheck(siteState != null ? siteState.get(loc.name) : null),
                    failures: failures[loc.name] || 0,
                    survey: survey === true, // top-level `survey: true` in hamon.yml
+                   // top-level `datasecure_log: true` (debug): log each Data Secure
+                   // telegram decrypted; read at the site's start (kpipe applies it)
+                   datasecureLog: originalDoc != null && originalDoc.datasecure_log === true,
                    stack: effectiveStack(loc.stack, stack), // top-level, else site's, else knx
                    dedupe: effectiveDedupe(loc.dedupe, dedupe), // ms: site's, else top-level, else 0 (off)
                    siblings: siblingsOf(loc) }
@@ -275,10 +285,16 @@ function start_worker(path, influxver, loc, survey, stack, dedupe) {
     })
     worker.on('message', (data) => {
        if (data && data.connected) { // KNX link up - clear the back-off
+           downConnected(data.connected);
            failures[data.connected] = 0;
            everConnected.add(data.connected);
            delete lastBlocked[data.connected];
+           if (siteState != null) siteState.note(data.connected, { linkLost: undefined });
            setState(data.connected, 'connected');
+       } else if (data && data.alive) { // a minute report while connected
+           alive(data.alive, data.lastData);
+       } else if (data && data.lost) { // the link went down; the stack retries
+           linkLost(data.lost);
        } else if (data && data.gateway) { // what the gateway offers, for hamon-upload
            if (siteState != null) { siteState.note(data.gateway, { tunnelVersion: data.tunnelVersion }); saveState(); }
        } else if (data && data.stopped) { // the worker stopped and says why
@@ -333,11 +349,16 @@ function compareLoc(oldLoc, newLoc, oldStack, newStack) {
 // worker asked to be restarted - apply back-off if it keeps failing
 function requestRestart(name) {
     failures[name] = (failures[name] || 0) + 1;
-    const delay = backoffDelay(failures[name]);
+    if (failures[name] === 1 && containerMode(name) !== 'off') downSince[name] = Date.now();
+    let delay = backoffDelay(failures[name]);
     if (delay == 0) {
-        restart(name);
+        restartSite(name);
         return;
     }
+    // a container site going into back-off: its container is restarted now
+    if (failures[name] === RESTART_FREE + 1 && downRetry(name)) return;
+    // ... and its later retries run a step behind (15, 30 ... 240 min after it)
+    if (failures[name] > RESTART_FREE + 1 && containerMode(name) === 'act') delay = backoffDelay(failures[name] - 1);
     logger.info(`Back-off: ${name} restart ${failures[name]} in ${delay / 60000}min`)
     scheduleRestart(name, delay);
 }
@@ -364,7 +385,7 @@ function scheduleRestart(name, delay) {
         // the config may have changed while waiting
         const loc = findLoc(name, originalDoc);
         if (loc != null && loc["enabled"] == true) {
-            restart(name);
+            if (!downRetry(name)) restartSite(name); // a container site: its container first
         } else {
             logger.info(`Back-off: ${name} no longer enabled, not restarting`)
             setState(name, 'disabled');
@@ -572,6 +593,211 @@ async function ConnectionService(firstrun, path, doc) {
     saveState();
   }
 }
+// ---- silence: connected but sending nothing (silence.js) ---------------------
+// set up in runService; the top-level `silence:` key in hamon.yml says
+// whether it only logs (report) or restarts (act)
+let silence = null
+let reinitSite = null // the kpipe restart, set up in runService
+const lastSeen = {}   // name -> the last telegram (ms), carried over a restart (silenceFrom)
+const containerRestarted = {} // container -> when: two sites on one container restart it once
+
+let docker = (args, cb) => execFile('docker', args, cb) // replaced in tests
+let CONTAINER_UP = 10 * 1000 // after a container restart, for its VPN to come up
+
+// a site's dns, '' if none: a container site's is its container's IP (172.*)
+function siteDns(name) {
+    const loc = findLoc(name, originalDoc)
+    return loc != null && loc.dns != null ? String(loc.dns) : ''
+}
+
+// the running container on the hamon network with this IP ('' if none)
+function containerFor(ip, cb) {
+    docker(['ps', '-q'], (err, out) => {
+        const ids = err ? [] : out.split(/\s+/).filter(Boolean)
+        if (ids.length === 0) return cb('')
+        docker(['inspect', '-f', '{{.Name}} {{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}', ...ids], (err2, info) => {
+            const row = err2 ? null : info.split('\n').map((l) => l.trim().split(/\s+/)).find((f) => f.slice(1).includes(ip))
+            cb(row ? row[0].replace(/^\//, '') : '')
+        })
+    })
+}
+
+// restart the container holding ip, at most once a minute (sites can share
+// one); report mode only says what it would do. done(how, wait): wait is true
+// when the container has just been (or is being) restarted
+function restartContainer(ip, act, done) {
+    containerFor(ip, (cont) => {
+        if (cont === '') return done(`no container at ${ip}`, false)
+        if (Date.now() - (containerRestarted[cont] || 0) < 60 * 1000) return done(`container ${cont} restarted already`, act)
+        containerRestarted[cont] = Date.now()
+        if (!act) return done(`docker restart ${cont}`, false)
+        docker(['restart', cont], (err) => {
+            done(err ? `docker restart ${cont} FAILED (${err.message.trim()})` : `docker restart ${cont}`, !err)
+        })
+    })
+}
+
+// what a silence restart does: a container site (dns 172.*) gets its
+// container restarted first, then every site is re-initialised as by kpipe
+function silenceRestart(name, act, done) {
+    const dns = siteDns(name)
+    const reinit = () => { if (act && reinitSite != null) reinitSite(name) }
+    if (!dns.startsWith('172.')) { done('re-init'); return reinit() }
+    restartContainer(dns, act, (how) => {
+        const did = /^docker restart \S+$/.test(how) // restarted, or would have in report mode
+        done(did ? `${how} + re-init` : `${how} - re-init only`)
+        setTimeout(reinit, did && act ? CONTAINER_UP : 0) // let the VPN come up first
+    })
+}
+
+// ---- container sites that stay down (step 3 of docs/site-states.md) ---------
+// a container site (dns 172.*) whose link keeps failing has its container
+// restarted as it goes into the back-off - a lost VPN path only comes back
+// that way - and again at each back-off retry, which for these sites runs a
+// step behind (15, 30 ... 240 min). Not while the uplink is down, at most
+// max_restarts until the site connects, and only logged in `silence: report`
+const downRestarts = {} // name -> container restarts since it last connected
+const downSince = {}    // name -> its first failure since it last connected (ms)
+const downCapped = new Set() // sites that reached max_restarts (logged once)
+let restartSite = (name) => restart(name) // replaced in tests
+
+// 'off' | 'report' | 'act' for a container site, 'off' for any other
+function containerMode(name) {
+    if (silence == null || !siteDns(name).startsWith('172.')) return 'off'
+    return silenceMode(originalDoc)
+}
+
+// a back-off retry for a site: a container site restarts its container, then
+// the site once the VPN is up. True when that's under way (act mode), false
+// when the caller restarts the site as before
+function downRetry(name) {
+    const m = containerMode(name)
+    if (m === 'off') return false
+    const act = m === 'act'
+    const say = (how, warn = true) => {
+        const line = `Back-off: ${name} down, ${how}${act ? '' : ' (report only)'}`
+        console.log(line)
+        if (warn) logger.warn(line); else logger.info(line)
+    }
+    const t = silence.thresholds()
+    const max = t != null ? t.maxRestarts : 6
+    const n = downRestarts[name] || 0
+    if (max > 0 && n >= max) {
+        if (!downCapped.has(name)) { downCapped.add(name); say(`${max} container restarts haven't helped - plain retries until it connects`) }
+        return false
+    }
+    const up = silence.uplink()
+    if (up != null) { say(`container restart held - uplink down (${up})`, false); return false }
+    downRestarts[name] = n + 1
+    restartContainer(siteDns(name), act, (how, wait) => {
+        say(`container restart ${n + 1}: ${how}`)
+        // as a back-off timer, so a kpipe restart or config change meanwhile cancels it
+        if (act) pending[name] = setTimeout(() => { delete pending[name]; restartSite(name) }, wait ? CONTAINER_UP : 0)
+    })
+    return act
+}
+
+// a site connected: how long a container site was down, and whether its
+// container restarts went with it
+function downConnected(name) {
+    if (downSince[name] != null && (failures[name] || 0) > RESTART_FREE) {
+        const mins = Math.round((Date.now() - downSince[name]) / 60000)
+        const line = `Back-off: ${name} connected again after ${mins}m down, ${downRestarts[name] || 0} container restart(s)`
+            + (containerMode(name) === 'report' ? ' (report only)' : '')
+        console.log(line)
+        logger.info(line)
+    }
+    delete downSince[name]
+    delete downRestarts[name]
+    downCapped.delete(name)
+}
+
+// where a site's silence clock starts when this run first hears from it: its
+// last telegram on record, or for a site silent since before the last run
+// started, when that spell's threshold was reached less the threshold. The
+// time ha-mon was stopped doesn't count, so a quick restart neither resets
+// the clock nor makes a long stop look like silence. Its spell (restarts so
+// far) is carried over too
+const carried = new Set() // sites whose silence has been carried over this run
+function silenceFrom(name) {
+    const st = siteState != null ? siteState.get(name) : null
+    if (carried.has(name)) return Date.now() // re-enabled or unblocked: start afresh
+    carried.add(name)
+    const down = siteState != null ? siteState.downtime : 0
+    if (st != null && silence != null) silence.restore(name, st.silent, down)
+    let from = st != null && st.lastData ? Date.parse(st.lastData) : NaN
+    if (isNaN(from) && st != null && st.silent != null) {
+        const t = silence != null ? silence.thresholds() : null
+        const thresh = t == null ? 0 : (t.sites[name] != null ? t.sites[name] : t.default)
+        from = Date.parse(st.silent.since) - thresh * 60000
+    }
+    return isNaN(from) ? Date.now() : Math.min(from + down, Date.now())
+}
+
+// the link went down while the worker retries: `linkLost` (when) in the state
+// file, through any restarts, until the site connects again
+function linkLost(name) {
+    if (siteState == null) return
+    siteState.note(name, { linkLost: new Date().toISOString() })
+    saveState()
+}
+
+// a worker's minute report: the site's last telegram
+function alive(name, lastData) {
+    let prev = lastSeen[name] // the telegram before this report's: the gap if data is back
+    if (lastSeen[name] == null) {
+        const from = silenceFrom(name) // carries the spell over too
+        prev = from
+        lastSeen[name] = lastData != null ? lastData : from // a telegram this run is newer
+    }
+    if (lastData != null && !(lastSeen[name] >= lastData)) lastSeen[name] = lastData
+    const iso = (ms) => new Date(ms).toISOString()
+    if (siteState != null && lastData != null) { siteState.note(name, { lastData: iso(lastSeen[name]) }); saveState() }
+    const m = silenceMode(originalDoc)
+    if (m === 'off' || silence == null) return
+    const st = siteState != null ? siteState.get(name) : null
+    const first = st != null && st.firstConnected ? Date.parse(st.firstConnected) : null
+    const r = silence.check(name, lastSeen[name], first)
+    const tag = m === 'report' ? ' (report only)' : ''
+    if (r.do === 'restart') {
+        const lost = st != null && st.linkLost ? Date.parse(st.linkLost) : NaN
+        const link = isNaN(lost) ? '' : `, link lost ${Math.round((Date.now() - lost) / 60000)}m ago`
+        silenceRestart(name, m === 'act', (how) => {
+            const line = `Silent: ${name} no data for ${r.age}m (>= ${r.thresh}m)${link}, restart ${r.n}: ${how}${tag}`
+            console.log(line)
+            logger.warn(line)
+        })
+    } else if (r.do === 'hold' && r.first) {
+        const line = `Silent: ${name} no data for ${r.age}m (>= ${r.thresh}m), held - uplink down (${r.why})${tag}`
+        console.log(line)
+        logger.warn(line)
+    } else if (r.do === 'grace' && r.first) {
+        const line = `Silent: ${name} no data for ${r.age}m (>= ${r.thresh}m), new site - not restarted until ${iso(r.until)}${tag}`
+        console.log(line)
+        logger.warn(line)
+    } else if (r.do === 'stop') {
+        const line = `Silent: ${name} no data for ${r.age}m (>= ${r.thresh}m), ${r.n} restarts haven't helped - no more until data (bus quiet or dead at the site?)${tag}`
+        console.log(line)
+        logger.warn(line)
+    } else if (r.do === 'end') {
+        // the real gap in the data, then how long the site had been counted silent
+        const gap = lastData != null && prev != null ? `after a ${Math.round((lastData - prev) / 60000)}m gap ` : ''
+        const line = `Silent: ${name} data again ${gap}(${r.minutes}m past the threshold), ${r.restarts} restart(s)${tag}`
+        console.log(line)
+        logger.info(line)
+    }
+    // in the site's state for hamon-upload: { since, restarts, next, held, stopped }
+    const s = siteState != null ? siteState.get(name) : null
+    if (s == null) return
+    const sp = silence.spells[name]
+    const t = silence.thresholds()
+    let silent
+    if (sp != null) silent = { since: iso(sp.since), restarts: sp.n, next: t != null ? iso(sp.t + cooldown(t, sp.n) * 60000) : null }
+    if (sp != null && sp.stopped) silent = { since: iso(sp.since), restarts: sp.n, stopped: true }
+    if (r.do === 'hold') silent = { ...(silent || { since: iso(r.since), restarts: 0 }), held: 'uplink' }
+    if (r.do === 'grace') silent = { since: iso(r.since), restarts: 0, grace: iso(r.until) }
+    if (silent !== undefined || s.silent !== undefined) { siteState.note(name, { silent }); saveState() }
+}
 
 let last_time = 0;
 let d = new Date().getTime();
@@ -613,6 +839,12 @@ async function runService(path, hamonConfig) {
             }
             return;
         }
+        reinit(ksite);
+    }
+
+    // "<site>" on the kpipe, and a silence restart: stop the site's worker and
+    // start it again at once
+    function reinit(ksite) {
         logger.info(`Looking to restart ${ksite}`);
         // we can call restart(site) but need to terminate first
         let oldLoc = findLoc(ksite, originalDoc);
@@ -677,6 +909,17 @@ async function runService(path, hamonConfig) {
   if (firstRun) {
     firstRun = false
     setThreads(getDoc(hamonConfig))
+    reinitSite = reinit
+    // the detector's thresholds file and netprobe's log; the uplink is read at
+    // most every 30s however many sites report
+    let uplinkAt = 0, uplinkWas = null
+    silence = new Silence({
+        thresholds: () => loadThresholds(path + 'freshness-thresholds.conf'),
+        uplink: () => {
+            if (Date.now() - uplinkAt > 30 * 1000) { uplinkAt = Date.now(); uplinkWas = uplinkDown(path + 'alerts/netprobe') }
+            return uplinkWas
+        },
+    })
     siteState = new SiteState(path + 'tmp/site-state.json');
     if (!siteState.load()) logger.info(`No site state from the last run - starting every enabled site`)
     originalDoc = getDoc(hamonConfig); // note so it availabe
@@ -686,5 +929,8 @@ async function runService(path, hamonConfig) {
 }
 
 module.exports.runService = runService
-// for test/crashbackoff.test.js
-module.exports._test = { noteCrash, backoffDelay, failures, watchDns }
+// for test/crashbackoff.test.js, backoffdns.test.js and silence.test.js
+module.exports._test = { noteCrash, backoffDelay, failures, watchDns, alive, lastSeen,
+    requestRestart, downConnected, downRestarts, pending, cancelPending, linkLost,
+    setDocker: (fn) => { docker = fn }, setContainerUp: (ms) => { CONTAINER_UP = ms }, setRestartSite: (fn) => { restartSite = fn },
+    setSilence: (s, doc, state) => { silence = s; originalDoc = doc; siteState = state } }

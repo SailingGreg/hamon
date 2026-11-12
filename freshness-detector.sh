@@ -31,6 +31,7 @@
 #       cooldown_max  ... up to this cap
 #     Optional reserved key:
 #       grace         new-site grace period (default 1440 = 24h, 0 = off)
+#       max_restarts  read by hamon's silence check only (silence.js)
 #     Any other key is a location (case-exact, as in Influx) whose threshold
 #     overrides `default` - for low-traffic sites with long normal quiet spells.
 #   * Grace: a site whose first knx2 point (within FIRST_LOOKBACK) is younger
@@ -49,7 +50,12 @@
 #     its STALE line says so (hamon: connected), so those cases can be counted.
 #     A misconfigured site is always left to hamon, container or not: its
 #     config is wrong, and no restart fixes that.
-#     No file, or ha-mon not running: act as before.
+#   * ha-mon not running (no state file, `running` false, or its pid isn't a
+#     live hamon.js): nothing is restarted. A kpipe write would block with no
+#     reader (and the lock would then skip every later run), and a container
+#     restart can't help a site no worker is connecting. The scan logs
+#     `HAMON down (<why>)` and holds each stale site as for the uplink, spell
+#     kept - the hook for the watchdog (step 4 of docs/site-states.md).
 #   * Cooldown: a site that stays stale is restarted at once, then after
 #     cooldown, 2x, 4x ... cooldown_max, instead of on every 5-minute run.  The
 #     spell (and the doubling) resets as soon as the site is seen fresh again.
@@ -81,7 +87,7 @@ export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"   # cron's PATH is minimal
 # ---- config -----------------------------------------------------------------
 HAMON="${HAMON:-/home/greg/hamon}"
 YML="$HAMON/hamon.yml"
-KPIPE="$HAMON/tmp/kpipe"
+KPIPE="${KPIPE:-$HAMON/tmp/kpipe}"
 LOG="${LOG:-$HAMON/alerts/freshness.log}"
 ENVFILE="${ENVFILE:-$HAMON/.hamon-backup.env}"   # provides INFLUX_TOKEN
 SECRETS="${SECRETS:-$HAMON/.freshness.env}"      # provides SLACK_WEBHOOK (optional)
@@ -175,26 +181,44 @@ load_first() {  # once per run, and only when a site is stale (not in a subshell
 }
 
 # ---- hamon's own state for each site ------------------------------------------
-# "<location> <state>" per site, only while ha-mon is running (file says so and
+# HAMON_DOWN: why ha-mon isn't running ("" while it is: the file says so and
 # its pid is a live hamon.js - EPERM from kill(0) counts as alive, ha-mon runs
-# as root); nothing otherwise, so a stopped ha-mon leaves the detector as before
+# as root). HAMON_SITE: "<location> <state>" per site, only while it runs
 declare -A HAMON_SITE=()
+HAMON_DOWN="no reply from the state check"
 while read -r l st; do
-  [ -n "$l" ] && HAMON_SITE["$l"]="$st"
+  case "$l" in
+    "") ;;
+    @up) HAMON_DOWN="" ;;
+    @down) HAMON_DOWN="$st" ;;
+    *) HAMON_SITE["$l"]="$st" ;;
+  esac
 done < <(python3 - "$SITE_STATE" <<'PY' 2>/dev/null
 import json, os, sys
-d = json.load(open(sys.argv[1]))
+def down(why):
+    print("@down", why)
+    sys.exit(0)
+try:
+    d = json.load(open(sys.argv[1]))
+except FileNotFoundError:
+    down("no state file")
+except ValueError:
+    down("state file unreadable")
 pid = d.get("pid")
 if d.get("running") is not True or not isinstance(pid, int):
-    sys.exit(0)
+    down(f"state file says stopped at {d.get('updated', '?')}")
 try:
     os.kill(pid, 0)
 except PermissionError:
     pass
 except OSError:
-    sys.exit(0)
-if b"hamon.js" not in open(f"/proc/{pid}/cmdline", "rb").read():
-    sys.exit(0)
+    down(f"pid {pid} gone")
+try:
+    if b"hamon.js" not in open(f"/proc/{pid}/cmdline", "rb").read():
+        down(f"pid {pid} is not hamon.js")
+except OSError:
+    down(f"pid {pid} gone")
+print("@up")
 for name, s in d.get("sites", {}).items():
     print(name, s.get("state", "?"))
 PY
@@ -211,6 +235,7 @@ if [ -f "$THRESH_FILE" ]; then
     fi
     case "$key" in
       default|cooldown|cooldown_max|grace) CONF["$key"]="$mins" ;;
+      max_restarts) ;;   # hamon's silence check (silence.js), not the detector's
       *) SITE_THRESH["$key"]="$mins" ;;
     esac
   done < "$THRESH_FILE"
@@ -260,7 +285,14 @@ restart_site() {
       fi
     fi
   fi
-  if [ "$DRYRUN" = 0 ]; then echo "$loc" > "$KPIPE"; fi
+  if [ "$DRYRUN" = 0 ] && ! kpipe_write "$loc"; then HOW="$HOW (kpipe not read)"; fi
+}
+
+# write a line to hamon's kpipe without hanging: a FIFO write blocks until
+# ha-mon reads it, so give up after 5 s (and never create a plain file)
+kpipe_write() {
+  [ -p "$KPIPE" ] || return 1
+  timeout 5 bash -c 'echo "$1" > "$2"' _ "$1" "$KPIPE" 2>/dev/null
 }
 
 # ---- hamon.yml helpers (case-exact: Influx tag == yml name) ------------------
@@ -374,6 +406,7 @@ log "freshness scan start ($mode_tag) default=${THRESH_MIN}m overrides=${#SITE_T
 
 UPLINK=$(uplink_down)
 [ -n "$UPLINK" ] && log "UPLINK down ($UPLINK) - stale sites held, not restarted"
+[ -n "$HAMON_DOWN" ] && log "HAMON down ($HAMON_DOWN) - stale sites held, not restarted"
 
 stale=0 acted=0 known=0 held=0
 while IFS=, read -r loc ts; do
@@ -417,10 +450,10 @@ while IFS=, read -r loc ts; do
   # cooldown: restart now on the first stale scan, then after cooldown, 2x ...
   n="${N_ACT[$loc]:-0}"; t="${LAST_ACT[$loc]:-0}"
 
-  # uplink down: no restart can help; keep the spell as it was
-  if [ -n "$UPLINK" ]; then
+  # uplink down or ha-mon not running: no restart can help; keep the spell as it was
+  if [ -n "$UPLINK" ] || [ -n "$HAMON_DOWN" ]; then
     held=$((held + 1))
-    log "HOLD  $loc ${age}m$plus (>=${thresh}m) uplink down - not restarted"
+    log "HOLD  $loc ${age}m$plus (>=${thresh}m) $([ -n "$UPLINK" ] && echo "uplink down" || echo "ha-mon not running") - not restarted"
     [ "$n" -gt 0 ] && { NEW_ACT["$loc"]="$t"; NEW_N["$loc"]="$n"; NEW_LAST["$loc"]="$last"; }
     continue
   fi

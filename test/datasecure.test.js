@@ -72,11 +72,12 @@ checks += 2
 
 // through the shim: decrypted telegrams come out as ordinary events; without
 // a key a DATASECURE line is logged (first, then every 100th) and nothing emitted
-function shim(dataSecure) {
+function shim(dataSecure, dataSecureLog = false) {
     const conn = Object.create(UltimateConnection.prototype)
-    conn.options = { site: 'site-a' }
+    conn.options = { site: 'site-a', dataSecureLog }
     conn.lines = []
-    conn.log = { warn: (...a) => conn.lines.push(a), info: () => {}, error: () => {} }
+    conn.infos = []
+    conn.log = { warn: (...a) => conn.lines.push(a), info: (...a) => conn.infos.push(a), error: () => {} }
     conn.events = []
     conn.emit = (e, ...a) => { if (e === 'event') conn.events.push(a) }
     if (dataSecure) conn.dataSecure = new DataSecure(dataSecure)
@@ -90,7 +91,16 @@ assert.deepStrictEqual(conn.events.map(([evt, src, dest, data]) => [evt, src, de
     ['GroupValue_Response', '1.1.11', '1/2/3', '80'],
 ], 'shim: decrypted events')
 assert.strictEqual(conn.lines.length, 0, 'shim: nothing logged')
-checks += 2
+assert.strictEqual(conn.infos.length, 0, 'shim: decrypts not logged by default')
+checks += 3
+// `datasecure_log: true`: one info line per decrypted telegram
+conn = shim(KEYS, true)
+for (const [, hex] of frames) conn.indication({ cEMIMessage: cemiOf(hex) }, false)
+const dl = conn.infos.map((a) => a.slice(1).join(' '))
+assert.strictEqual(dl.length, 3, 'decrypt log: one line each')
+assert.ok(conn.infos.every((a) => /^DATASECURE decrypted %s from %s, seq %s$/.test(a[0])), 'decrypt log: format')
+assert.ok(/^5\/0\/1 1\.1\.10 \d+$/.test(dl[0]), `decrypt log: GA, sender, seq (${dl[0]})`)
+checks += 3
 conn = shim(undefined)
 for (let i = 0; i < 100; i++) conn.indication({ cEMIMessage: cemiOf(frames[0][1]) }, false)
 assert.strictEqual(conn.events.length, 0, 'shim, no key: nothing emitted')

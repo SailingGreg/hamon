@@ -8,6 +8,10 @@
  * The site's hooks become messages to service.js, as before:
  *   { connected: name }                     the tunnel is up
  *   { gateway: name, tunnelVersion }        what the gateway offers
+ *   { alive: name, lastData }               every minute while connected (a
+ *                                           container site: always): the last
+ *                                           telegram (silence.js)
+ *   { lost: name }                          the link went down
  *   { stopped: name, reason, detail }       blocked ('dns', 'unreachable') or
  *                                           misconfigured ('config')
  *   name                                    timed out: restart with back-off
@@ -43,6 +47,8 @@ for (const stream of [process.stdout, process.stderr]) {
 const site = createSite(workerData.location, workerData, {
     connected: () => parentPort.postMessage({ connected: name }),
     gateway: (tunnelVersion) => parentPort.postMessage({ gateway: name, tunnelVersion }),
+    alive: (lastData) => parentPort.postMessage({ alive: name, lastData }),
+    lost: () => parentPort.postMessage({ lost: name }),
     stopped: (reason, detail) => {
         parentPort.postMessage({ stopped: name, reason, detail })
         process.exit(0)

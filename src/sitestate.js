@@ -19,6 +19,12 @@
  * half-written file) and carries the ha-mon pid and `running`, so a reader can
  * tell a current file from one left by a stopped ha-mon. tunnelVersion is the
  * gateway's own answer, kept across states: 2 = tunnelling v2, which offers TCP.
+ * lastData (the last telegram, kept across states) and, while a connected site
+ * is silent, `silent` ({ since, restarts, next, held, grace, stopped }) come
+ * from service.js's silence check (silence.js); both carry the silence over an
+ * ha-mon restart. firstConnected is set when a site
+ * connects with no connection on record, or none in NEW_AFTER_DAYS: while it is
+ * recent the site is new, and its silence isn't acted on (the grace period).
  */
 const fs = require('fs')
 
@@ -59,12 +65,17 @@ function needsPrecheck(site, now = new Date(), days = PRECHECK_DAYS) {
 // states a site is held in, with no timed retry, until its config changes
 const HELD = ['blocked', 'misconfigured']
 
+// a site back after this long without a connection counts as new again (as the
+// freshness detector, which looks 30 days back for a site's first data)
+const NEW_AFTER_DAYS = 30
+
 class SiteState {
     constructor(file, { now = () => new Date(), pid = process.pid } = {}) {
         this.file = file
         this.now = now
         this.pid = pid
         this.sites = {}
+        this.downtime = 0 // ms between the previous run's last save and load()
     }
 
     // the previous run's state; a missing or unreadable file starts empty
@@ -73,6 +84,8 @@ class SiteState {
             const doc = JSON.parse(fs.readFileSync(this.file, 'utf8'))
             if (doc && typeof doc.sites === 'object' && doc.sites !== null) {
                 this.sites = doc.sites
+                const updated = Date.parse(doc.updated)
+                this.downtime = isNaN(updated) ? 0 : Math.max(0, this.now().getTime() - updated)
                 return true
             }
         } catch (e) {
@@ -98,7 +111,15 @@ class SiteState {
             ...extra,
         }
         if (old.tunnelVersion != null) s.tunnelVersion = old.tunnelVersion
+        if (old.lastData != null && s.lastData == null) s.lastData = old.lastData
+        if (old.firstConnected != null && s.firstConnected == null) s.firstConnected = old.firstConnected
+        // a silent spell outlives a reconnect or an ha-mon restart, not a hold
+        if (old.silent != null && s.silent == null && !HELD.includes(state) && state !== 'disabled') s.silent = old.silent
+        // so does a lost link, until the site connects again
+        if (old.linkLost != null && s.linkLost == null && !HELD.includes(state) && state !== 'disabled' && state !== 'connected') s.linkLost = old.linkLost
         if (state === 'connected') {
+            const before = Date.parse(old.lastConnected)
+            if (isNaN(before) || this.now().getTime() - before > NEW_AFTER_DAYS * 86400000) s.firstConnected = now
             s.failures = 0
             s.lastConnected = now
         }
@@ -141,4 +162,4 @@ class SiteState {
     }
 }
 
-module.exports = { SiteState, fingerprint, needsPrecheck, PRECHECK_DAYS, CHANGE_FIELDS, HELD }
+module.exports = { SiteState, fingerprint, needsPrecheck, PRECHECK_DAYS, CHANGE_FIELDS, HELD, NEW_AFTER_DAYS }

@@ -11,6 +11,12 @@ cooldown_max  240   # ... up to this cap (matches hamon's own 4h back-off cap)
 # its normal traffic is known. Default 1440 (24h); 0 turns it off.
 #grace        1440
 
+# optional, hamon's silence check only (silence.js; the detector ignores it): a
+# count, not minutes. After this many restarts in one silent spell hamon stops
+# restarting the site until data returns - a bus that is quiet or dead at the
+# site, which a restart can't fix. Default 6; 0 never stops.
+#max_restarts 6
+
 # optional per-site thresholds (location name exactly as in Influx), for
 # low-traffic sites whose normal quiet spells are longer than `default`
 #example_site 720
