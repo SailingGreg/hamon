@@ -7,9 +7,11 @@ Wants=network-online.target
 Type=oneshot
 User=greg
 Group=greg
-# Live (DRYRUN=0) since 2026-10-08: replaced kapacitor deadmanv2, which is
-# disabled along with the kapacitor service.  DRYRUN=1 = report only.
-Environment=DRYRUN=0
+# Live (DRYRUN=0) 2026-10-08 to 2026-11-13: replaced kapacitor deadmanv2.
+# Report only (DRYRUN=1) since 2026-11-13, when hamon took over silence
+# recovery (hamon.yml `silence: act`, docs/site-states.md step 2). Back to
+# DRYRUN=0 only together with `silence: report` or `off`.
+Environment=DRYRUN=1
 WorkingDirectory=/home/greg/hamon
 ExecStart=/home/greg/hamon/freshness-detector.sh
 Nice=5
