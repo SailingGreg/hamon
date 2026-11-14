@@ -600,6 +600,10 @@ let silence = null
 let reinitSite = null // the kpipe restart, set up in runService
 const lastSeen = {}   // name -> the last telegram (ms), carried over a restart (silenceFrom)
 const containerRestarted = {} // container -> when: two sites on one container restart it once
+// a container restarted this recently isn't restarted again by either ladder
+// (silence or back-off): its VPN and gateway need ~7 min to come back, and
+// two ladders 5-10 min apart only restart a path that's still coming up
+let RESTART_GAP = 15 * 60 * 1000
 
 let docker = (args, cb) => execFile('docker', args, cb) // replaced in tests
 let CONTAINER_UP = 10 * 1000 // after a container restart, for its VPN to come up
@@ -622,13 +626,16 @@ function containerFor(ip, cb) {
     })
 }
 
-// restart the container holding ip, at most once a minute (sites can share
-// one); report mode only says what it would do. done(how, wait): wait is true
-// when the container has just been (or is being) restarted
+// restart the container holding ip, at most once per RESTART_GAP whichever
+// ladder asks (sites can share one too); report mode only says what it would
+// do. done(how, wait): wait is true when the container has just been (or is
+// being) restarted
 function restartContainer(ip, act, done) {
     containerFor(ip, (cont) => {
         if (cont === '') return done(`no container at ${ip}`, false)
-        if (Date.now() - (containerRestarted[cont] || 0) < 60 * 1000) return done(`container ${cont} restarted already`, act)
+        const ago = Date.now() - (containerRestarted[cont] || 0)
+        if (ago < 60 * 1000) return done(`container ${cont} restarted already`, act)
+        if (ago < RESTART_GAP) return done(`container ${cont} restarted ${Math.round(ago / 60000)}m ago`, false)
         containerRestarted[cont] = Date.now()
         if (!act) return done(`docker restart ${cont}`, false)
         docker(['restart', cont], (err) => {
@@ -688,9 +695,10 @@ function downRetry(name) {
     }
     const up = silence.uplink()
     if (up != null) { say(`container restart held - uplink down (${up})`, false); return false }
-    downRestarts[name] = n + 1
     restartContainer(siteDns(name), act, (how, wait) => {
-        say(`container restart ${n + 1}: ${how}`)
+        // one skipped as restarted recently (by either ladder) isn't counted
+        if (/ restarted (already|\d+m ago)$/.test(how)) say(`${how} - site restart only`)
+        else { downRestarts[name] = n + 1; say(`container restart ${n + 1}: ${how}`) }
         // as a back-off timer, so a kpipe restart or config change meanwhile cancels it
         if (act) pending[name] = setTimeout(() => { delete pending[name]; restartSite(name) }, wait ? CONTAINER_UP : 0)
     })
@@ -932,5 +940,5 @@ module.exports.runService = runService
 // for test/crashbackoff.test.js, backoffdns.test.js and silence.test.js
 module.exports._test = { noteCrash, backoffDelay, failures, watchDns, alive, lastSeen,
     requestRestart, downConnected, downRestarts, pending, cancelPending, linkLost,
-    setDocker: (fn) => { docker = fn }, setContainerUp: (ms) => { CONTAINER_UP = ms }, setRestartSite: (fn) => { restartSite = fn },
+    setDocker: (fn) => { docker = fn }, setContainerUp: (ms) => { CONTAINER_UP = ms }, setRestartGap: (ms) => { RESTART_GAP = ms }, setRestartSite: (fn) => { restartSite = fn },
     setSilence: (s, doc, state) => { silence = s; originalDoc = doc; siteState = state } }

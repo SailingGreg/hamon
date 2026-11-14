@@ -79,7 +79,8 @@ let checks = 0
         fail('box2', 4)
         await wait(30)
         assert.ok(!calls.includes('restart vpnbox'), 'shared container: one restart a minute'); checks++
-        assert.ok(/container restart 1: container vpnbox restarted already$/.test(out.pop())); checks++
+        assert.ok(/^Back-off: box2 down, container vpnbox restarted already - site restart only$/.test(out.pop())); checks++
+        assert.strictEqual(svc.downRestarts.box2, undefined, 'a skipped restart is not counted'); checks++
         assert.deepStrictEqual(restarted.slice(3), ['box2'], 'site still restarted'); checks++
         reset('box2')
 
@@ -92,6 +93,24 @@ let checks = 0
         await wait(60)
         assert.deepStrictEqual(restarted.filter((n) => n === 'box').length, 3, 'cancelled: no second worker'); checks++
         svc.setContainerUp(5)
+        reset('box')
+
+        // restarted 5 min ago (by either ladder): not again, the site retried at once
+        const realNow = Date.now
+        let skew = 5 * MIN
+        Date.now = () => realNow() + skew
+        fail('box', 4)
+        await wait(20)
+        assert.ok(!calls.includes('restart vpnbox'), 'within the gap: no docker restart'); checks++
+        assert.ok(/^Back-off: box down, container vpnbox restarted 5m ago - site restart only$/.test(out.pop())); checks++
+        assert.strictEqual(restarted.length, 4, 'site restarted without the VPN wait'); checks++
+        assert.strictEqual(svc.downRestarts.box, undefined, 'not counted'); checks++
+        reset('box')
+        // past the gap: restarted again
+        skew += 11 * MIN
+        fail('box', 4)
+        await wait(30)
+        assert.ok(calls.includes('restart vpnbox'), 'after 15 min: docker restart'); checks++
         reset('box')
 
         // no container at the IP: retried at once, logged
