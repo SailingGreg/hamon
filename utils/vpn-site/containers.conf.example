@@ -1,0 +1,11 @@
+# vpn/containers.conf - the VPN containers hamon's container sites run in,
+# read by utils/vpn-up.sh (at boot: hamon-vpn.service) and hamon-watchdog.sh.
+# Site-local (vpn/ isn't in git).
+#
+#   <container> <address> <script in vpn/ that creates it>
+#
+# The address is hamon.yml's dns: for the site(s); two sites on one gateway
+# share one line. The script must create the container detached (-d) and
+# must not need answers: vpn-up runs it with no terminal.
+site-a      172.18.0.11  site-a.sh
+site-b      172.18.0.12  site-b.sh

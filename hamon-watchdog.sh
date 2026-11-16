@@ -27,12 +27,17 @@
 #     Influx's newest knx2 point is older than INFLUX_MIN -> INFLUX not
 #     storing. An uplink outage stops hamon's data too, so it can't trip this.
 #
+#   VPN containers (vpn/containers.conf, as utils/vpn-up.sh): an enabled
+#     container site whose container is missing or stopped (not just
+#     restarting) -> VPN line. hamon restarts a container but can't create
+#     one; utils/vpn-up.sh does (at boot, or by hand).
+#
 # Logging: one line when the status changes (alerts/watchdog.log), and an
 # `ok` line on the first run of each hour so the log shows it is alive.
 # tmp/watchdog.json = the current status, for the board.
 #
 # Env overrides (also for test/hamon-watchdog.test.sh): HAMON, UNIT, LOG,
-#   STATUS, SITE_STATE, ERRLOG, HANG_MIN, START_MIN, FRESH_MIN, MIN_SITES,
+#   STATUS, SITE_STATE, ERRLOG, VPNCONF, YML, HANG_MIN, START_MIN, FRESH_MIN, MIN_SITES,
 #   INFLUX_MIN, ORG, BUCKET, ENVFILE, NOW (epoch seconds)
 
 set -uo pipefail
@@ -44,6 +49,8 @@ LOG="${LOG:-$HAMON/alerts/watchdog.log}"
 STATUS="${STATUS:-$HAMON/tmp/watchdog.json}"
 SITE_STATE="${SITE_STATE:-$HAMON/tmp/site-state.json}"
 ERRLOG="${ERRLOG:-$HAMON/hamon.err}"
+VPNCONF="${VPNCONF:-$HAMON/vpn/containers.conf}"
+YML="${YML:-$HAMON/hamon.yml}"
 ENVFILE="${ENVFILE:-$HAMON/.hamon-backup.env}"   # INFLUX_TOKEN
 HANG_MIN="${HANG_MIN:-5}"
 START_MIN="${START_MIN:-3}"
@@ -132,9 +139,34 @@ from(bucket:\"$BUCKET\")
   *) status="ok"; detail="$active" ;;   # activating/deactivating: a restart in progress
 esac
 
+# ---- VPN containers ---------------------------------------------------------
+# "<container> <state> (<sites>)" for each one an enabled site needs that is
+# missing or stopped; empty when all are up (or there is no containers.conf)
+vpn=""
+if [ -f "$VPNCONF" ]; then
+  while read -r ip site; do
+    c=$(awk -v ip="$ip" '$1 !~ /^#/ && $2 == ip {print $1; exit}' "$VPNCONF")
+    [ -z "$c" ] && { vpn+="${vpn:+; }$site ($ip) has no container in containers.conf (utils/vpn-up.sh --check)"; continue; }
+    st=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo missing)
+    case "$st" in running|restarting) ;; *) vpn+="${vpn:+; }$c $st ($site)" ;; esac
+  done < <(python3 - "$YML" <<'PY' 2>/dev/null
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1])) or {}
+seen = {}
+for l in (d.get("locations") or {}).values():
+    dns = str(l.get("dns", ""))
+    if dns.startswith("172.18.") and l.get("enabled", True) is not False:
+        seen[dns] = seen.get(dns, []) + [str(l.get("name"))]
+for ip, names in seen.items():
+    print(ip, ",".join(names))
+PY
+)
+fi
+
 # ---- report on change -------------------------------------------------------
 prev=$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("status",""),d.get("hour",""))' "$STATUS" 2>/dev/null)
 prev_status=${prev%% *}; prev_hour=${prev##* }
+prev_vpn=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("vpn",""))' "$STATUS" 2>/dev/null)
 hour=$(date -d "@$NOW" +%Y%m%d%H)
 log() { printf '%s %s\n' "$(stamp)" "$*" >> "$LOG"; }
 
@@ -151,9 +183,14 @@ elif [ "$hour" != "$prev_hour" ] && [ "$status" = ok ]; then
   log "ok"
 fi
 
-python3 - "$STATUS" "$status" "$detail" "$(iso "$NOW")" "$hour" "${prev_status:-}" <<'PY'
+if [ "$vpn" != "$prev_vpn" ]; then
+  if [ -n "$vpn" ]; then log "VPN     container down: $vpn - utils/vpn-up.sh brings it up"
+  else log "VPN     all containers up${prev_vpn:+ (was: $prev_vpn)}"; fi
+fi
+
+python3 - "$STATUS" "$status" "$detail" "$(iso "$NOW")" "$hour" "${prev_status:-}" "$vpn" <<'PY'
 import json, os, sys
-f, status, detail, now, hour, prev = sys.argv[1:7]
+f, status, detail, now, hour, prev, vpn = sys.argv[1:8]
 since = now
 try:
     old = json.load(open(f))
@@ -161,6 +198,6 @@ try:
 except Exception:
     pass
 tmp = f + ".tmp"
-json.dump({"checked": now, "status": status, "since": since, "detail": detail, "hour": hour}, open(tmp, "w"))
+json.dump({"checked": now, "status": status, "since": since, "detail": detail, "hour": hour, "vpn": vpn}, open(tmp, "w"))
 os.replace(tmp, f)
 PY
