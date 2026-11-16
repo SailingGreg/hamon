@@ -16,7 +16,7 @@ docker() {
   echo "$*" >> "$D/calls"
   case "$1" in
     inspect)
-      local c="${!#}"; [ -f "$D/$c" ] || return 1
+      local c="${!#}"; [ -f "$D/$c" ] || { echo; return 1; }   # as docker: an empty line, then fail
       read -r st ip tun < "$D/$c"
       case "$*" in *Status*) echo "$st" ;; *IPAddress*) echo "$ip " ;; esac ;;
     start) [ -f "$D/$2" ] || return 1; read -r st ip tun < "$D/$2"; echo "running $ip $tun" > "$D/$2" ;;

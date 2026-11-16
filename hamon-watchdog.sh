@@ -147,7 +147,7 @@ if [ -f "$VPNCONF" ]; then
   while read -r ip site; do
     c=$(awk -v ip="$ip" '$1 !~ /^#/ && $2 == ip {print $1; exit}' "$VPNCONF")
     [ -z "$c" ] && { vpn+="${vpn:+; }$site ($ip) has no container in containers.conf (utils/vpn-up.sh --check)"; continue; }
-    st=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo missing)
+    st=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null) || st=missing   # it prints an empty line first
     case "$st" in running|restarting) ;; *) vpn+="${vpn:+; }$c $st ($site)" ;; esac
   done < <(python3 - "$YML" <<'PY' 2>/dev/null
 import sys, yaml

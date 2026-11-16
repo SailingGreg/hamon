@@ -154,7 +154,8 @@ for ip in $(printf '%s\n' "${!SITES[@]}" | sort -t. -k4 -n); do
         say "${SITES[$ip]} ($ip): no container in $(basename "$CONF") - not started"
         continue
     fi
-    state=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo missing)
+    # (docker inspect prints an empty line for a missing container before failing)
+    state=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null) || state=missing
     case "$state" in
         running)
             say "$c ($ip, ${SITES[$ip]}): running" ;;
