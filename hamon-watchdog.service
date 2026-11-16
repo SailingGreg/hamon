@@ -1,0 +1,13 @@
+[Unit]
+Description=hamon watchdog: ha-mon running, not hung, data reaching Influx (report only)
+After=network-online.target influxdb.service
+
+[Service]
+Type=oneshot
+User=greg
+Group=greg
+# Report only (docs/site-states.md step 4): it never restarts ha-mon, since a
+# crash on a device's data would crash again on the restart.
+WorkingDirectory=/home/greg/hamon
+ExecStart=/home/greg/hamon/hamon-watchdog.sh
+Nice=5
