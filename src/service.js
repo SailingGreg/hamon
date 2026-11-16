@@ -116,8 +116,20 @@ function saveState() {
     if (siteState == null || saveTimer != null) return
     saveTimer = setTimeout(() => {
         saveTimer = null
-        reportSave(siteState.save())
+        // once a signal has arrived the file must keep saying ha-mon is
+        // stopping, whatever the sites do while they exit
+        reportSave(siteState.save(sigcnt === 0))
     }, 500)
+}
+
+// the file is also saved every minute with no change, so its `updated` is a
+// heartbeat: older than a few minutes with `running: true` means ha-mon's
+// main thread is stuck (hamon-watchdog.sh)
+const HEARTBEAT = 60 * 1000
+function startHeartbeat() {
+    const t = setInterval(() => { if (sigcnt === 0) saveState() }, HEARTBEAT)
+    if (t.unref) t.unref()
+    return t
 }
 function reportSave(err) {
     if (err != null && !saveFailed) logger.error(`Site state not saved: ${err}`) // once, not every change
@@ -930,6 +942,7 @@ async function runService(path, hamonConfig) {
     })
     siteState = new SiteState(path + 'tmp/site-state.json');
     if (!siteState.load()) logger.info(`No site state from the last run - starting every enabled site`)
+    startHeartbeat();
     originalDoc = getDoc(hamonConfig); // note so it availabe
     return ConnectionService(true, path, originalDoc);
      // getDoc(hamonConfig))
@@ -938,7 +951,8 @@ async function runService(path, hamonConfig) {
 
 module.exports.runService = runService
 // for test/crashbackoff.test.js, backoffdns.test.js and silence.test.js
-module.exports._test = { noteCrash, backoffDelay, failures, watchDns, alive, lastSeen,
+module.exports._test = { noteCrash, saveState, startHeartbeat, HEARTBEAT,
+    backoffDelay, failures, watchDns, alive, lastSeen,
     requestRestart, downConnected, downRestarts, pending, cancelPending, linkLost,
     setDocker: (fn) => { docker = fn }, setContainerUp: (ms) => { CONTAINER_UP = ms }, setRestartGap: (ms) => { RESTART_GAP = ms }, setRestartSite: (fn) => { restartSite = fn },
     setSilence: (s, doc, state) => { silence = s; originalDoc = doc; siteState = state } }
