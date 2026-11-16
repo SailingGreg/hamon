@@ -297,6 +297,13 @@ fi
 if [ -f "$VPN_DIR/locations.txt" ] && ! grep -qx "$SITE" "$VPN_DIR/locations.txt"; then
     echo "$SITE" >>"$VPN_DIR/locations.txt"
 fi
+# containers.conf: what utils/vpn-up.sh (boot) and the watchdog read; the
+# site's line is replaced (a -f re-run keeps the address), others kept
+CONTAINERS="$VPN_DIR/containers.conf"
+[ -f "$CONTAINERS" ] || printf '# <container> <address> <script in vpn/> - see utils/vpn-site/containers.conf.example\n' >"$CONTAINERS"
+awk -v c="$SITE" '$1 != c' "$CONTAINERS" >"$CONTAINERS.tmp" &&
+    printf '%-14s %-13s %s\n' "$SITE" "$IPADDR" "$(basename "$RUNSCRIPT")" >>"$CONTAINERS.tmp" &&
+    mv "$CONTAINERS.tmp" "$CONTAINERS"
 
 echo "  written: $SITEDIR/ and $RUNSCRIPT"
 echo "next:"
@@ -304,7 +311,7 @@ echo "next:"
 [ -n "$DEST" ] && echo "  utils/vpn-site/test-site.sh $SITE          (optional) tunnel check before the real container"
 echo "  $RUNSCRIPT                        start it"
 echo "  python3 utils/knxdesc.py $IPADDR:$PORT   the interface answers through the container"
-echo "  hamon.yml / hamon-upload: dns: $IPADDR, port: $PORT"
+echo "  hamon.yml / hamon-upload: dns: $IPADDR, port: $PORT, then utils/vpn-up.sh --check"
 if [ "$GIRA" = 1 ]; then
     echo "  Gira S1: add $SITE to the vpn-reconnect.sh cron line (planned reconnect before the S1 renegotiates)"
 fi

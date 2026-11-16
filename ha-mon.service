@@ -7,7 +7,10 @@
 
 [Unit]
 Description=HA KNX Monitoring Service
-After=multi-user.target
+# at boot: the database, docker and the VPN containers first, so container
+# sites don't start into a back-off (hamon-vpn.service waits for the tunnels)
+Wants=network-online.target hamon-vpn.service
+After=multi-user.target network-online.target docker.service influxdb.service hamon-vpn.service
 
 [Service]
 Environment=HOME=/home/greg

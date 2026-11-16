@@ -1,0 +1,20 @@
+[Unit]
+Description=hamon: bring up the VPN containers for enabled container sites (utils/vpn-up.sh)
+# docker restores no container we depend on: the OpenVPN ones are on-failure
+# (not restarted after a clean shutdown) and the L2TP one runs with --rm
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+Before=ha-mon.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=greg
+Group=greg
+Environment=HOME=/home/greg
+WorkingDirectory=/home/greg/hamon
+ExecStart=/home/greg/hamon/utils/vpn-up.sh
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
