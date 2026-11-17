@@ -3,15 +3,17 @@
 # l2tp-watch.sh - drop log and point-of-failure capture for L2TP VPN sites
 #
 # The L2TP sites lose their KNX path every few days while the PPP session and
-# IPsec stay up; hamon logs "Connection dead" ~90 s later and the freshness
-# detector restarts the container 10-25 min after that. That is ~3/4 of the
+# IPsec stay up; hamon logs "Connection dead" ~90 s later and hamon's silence
+# ladder restarts the container 5 min after that (the freshness detector did
+# this before 2026-11-13). That is ~3/4 of the
 # drops, so this covers only that case. It follows hamon's combined.log and for
 # each site in an L2TP container (one with a ppp0):
 #
 #   drops.log      one line per drop when it ends: site, start (when hamon
 #                  logged "Connection dead"), end, seconds,
-#                  and what ended it (self, or detector = the container was
-#                  restarted meanwhile)
+#                  and what ended it (self, or restarted = the container was
+#                  restarted meanwhile, by hamon or by hand; lines before
+#                  2026-11-17 say "detector" for this)
 #   capture-DATE   on "Connection dead": the container's state (ppp0, IPsec SA
 #                  ages, processes, DNAT counters and ppp0 traffic 5 s apart,
 #                  conntrack count, pings to the PPP peer and the gateway, a
@@ -20,8 +22,8 @@
 #                  Once per container per 2 min (sites sharing one are one
 #                  capture)
 #
-# Stalls (no events and no error logged) are left to the freshness detector,
-# whose journal records them (STALE ... restart N).
+# Stalls (no events and no error logged) are left to hamon's silence ladder
+# ("Silent:" lines in hamon.log).
 #
 # Read-only: it never restarts anything. Logs go to alerts/l2tp-watch/.
 # Runs as a service (l2tp-watch.service). One line per event on stdout.
@@ -118,7 +120,7 @@ end_drop() {
     local site=$1 t=$2 how=self s e
     s=$(date -d "${start[$site]}" +%s); e=$(date -d "$t" +%s)
     if [ "$(started_at "${cont[$site]}")" -ge "$s" ]; then
-        how=detector
+        how=restarted
     fi
     echo "$site ${start[$site]/ /T} ${t/ /T} $(( e - s )) $how" >> "$OUT/drops.log"
     log "$site: drop ${start[$site]} -> $t ($(( e - s )) s, $how)"
