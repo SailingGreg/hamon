@@ -73,6 +73,7 @@ ok(!fs.existsSync(file + '.tmp'), 'no .tmp left behind')
 const doc = JSON.parse(fs.readFileSync(file, 'utf8'))
 eq(doc.pid, 1234, 'file has the pid')
 eq(doc.running, true, 'file says running')
+ok(doc.memory.heapUsed > 0 && doc.memory.rss >= doc.memory.heapUsed, 'file has memory in MB (heapUsed <= rss)')
 st.save(false)
 eq(JSON.parse(fs.readFileSync(file, 'utf8')).running, false, 'stopped ha-mon says running: false')
 

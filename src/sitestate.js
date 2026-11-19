@@ -150,7 +150,7 @@ class SiteState {
     }
 
     save(running = true) {
-        const doc = { updated: this.now().toISOString(), pid: this.pid, running, sites: this.sites }
+        const doc = { updated: this.now().toISOString(), pid: this.pid, running, memory: memory(), sites: this.sites }
         const tmp = `${this.file}.tmp`
         try {
             fs.writeFileSync(tmp, JSON.stringify(doc, null, 1) + '\n')
@@ -160,6 +160,14 @@ class SiteState {
         }
         return null
     }
+}
+
+// ha-mon's own memory in MB, from inside the process, so tmp/memlog.sh can tell
+// a growing JS heap (a leak: heapUsed keeps rising after GC) from V8/the
+// allocator holding freed memory (rss up, heapUsed flat)
+function memory() {
+    const m = process.memoryUsage(), mb = n => Math.round(n / 1048576)
+    return { rss: mb(m.rss), heapUsed: mb(m.heapUsed), heapTotal: mb(m.heapTotal), external: mb(m.external), arrayBuffers: mb(m.arrayBuffers) }
 }
 
 module.exports = { SiteState, fingerprint, needsPrecheck, PRECHECK_DAYS, CHANGE_FIELDS, HELD, NEW_AFTER_DAYS }
