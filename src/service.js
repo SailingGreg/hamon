@@ -239,6 +239,25 @@ process.on('SIGINT', sigHandler);
 process.on('SIGTERM', sigHandler);
 process.on('SIGHUP', sigHandler);
 
+// SIGUSR2: write a V8 heap snapshot to tmp/ for leak hunting (diff two in
+// Chrome DevTools > Memory). Blocks the event loop while it writes (seconds,
+// and briefly needs up to ~2x the heap); covers the main thread only, so with
+// threads:true the sites' own heaps are not in it. (SIGUSR1 is node's inspector.)
+process.on('SIGUSR2', () => {
+    const v8 = require('v8')
+    const path = require('path')
+    const t0 = Date.now()
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const file = path.join(__dirname, '..', 'tmp', `heap-${stamp}.heapsnapshot`)
+    try {
+        const used = Math.round(process.memoryUsage().heapUsed / 1048576)
+        v8.writeHeapSnapshot(file)
+        console.log(`Heap snapshot ${file} (heapUsed ${used} MB) in ${Date.now() - t0} ms`)
+    } catch (err) {
+        console.log(`Heap snapshot failed: ${err.message}`)
+    }
+})
+
 //let orgLoc = {};
 //let orgDoc = {};
 let originalDoc = {};
