@@ -21,7 +21,11 @@
 # Exit 0 unless the config can't be read: a site that won't come up must not
 # stop ha-mon starting.
 #
-# usage: utils/vpn-up.sh [-n]      -n: say what it would do, change nothing
+# usage: utils/vpn-up.sh [-n] [--only <address>]
+#                                 -n: say what it would do, change nothing
+#                                 --only: just the container at that address
+#                                 (hamon's ladder, when no running container
+#                                 holds a site's address: stopped or missing)
 #        utils/vpn-up.sh --check  is containers.conf consistent with hamon.yml,
 #                                 the scripts and docker? Changes nothing;
 #                                 exit 1 if anything is wrong
@@ -32,14 +36,24 @@ HAMON="${HAMON:-$(cd "$(dirname "$0")/.." && pwd)}"
 CONF="${CONF:-$HAMON/vpn/containers.conf}"
 YML="${YML:-$HAMON/hamon.yml}"
 WAIT="${WAIT:-120}"
-DRY=0; [ "${1:-}" = -n ] && DRY=1
+DRY=0; CHECK=0; ONLY=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -n) DRY=1 ;;
+        --check) CHECK=1 ;;
+        --only) ONLY="${2:-}"; shift
+                [ -n "$ONLY" ] || { echo "vpn-up: --only needs an address" >&2; exit 1; } ;;
+        *) echo "vpn-up: unknown argument $1" >&2; exit 1 ;;
+    esac
+    shift
+done
 
 say() { echo "vpn-up: $*"; }
 
 [ -f "$CONF" ] || { say "no $CONF - nothing to bring up"; exit 1; }
 
 # ---- --check: containers.conf against hamon.yml, the scripts and docker -----
-if [ "${1:-}" = --check ]; then
+if [ "$CHECK" = 1 ]; then
     python3 - "$CONF" "$YML" "$HAMON/vpn" <<'PY'
 import json, os, re, subprocess, sys, yaml
 conf, yml, vdir = sys.argv[1:4]
@@ -147,8 +161,14 @@ done <<< "$sites"
 
 tunnel() { docker exec "$1" ip -o link 2>/dev/null | grep -qE '^[0-9]+: (tun|tap|ppp)[0-9]+'; }
 
+if [ -n "$ONLY" ] && [ -z "${SITES[$ONLY]:-}" ]; then
+    say "$ONLY: no enabled container site at this address - nothing to bring up"
+    exit 0
+fi
+
 want=()
 for ip in $(printf '%s\n' "${!SITES[@]}" | sort -t. -k4 -n); do
+    [ -n "$ONLY" ] && [ "$ip" != "$ONLY" ] && continue
     c="${NAME[$ip]:-}"
     if [ -z "$c" ]; then
         say "${SITES[$ip]} ($ip): no container in $(basename "$CONF") - not started"
