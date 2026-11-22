@@ -630,13 +630,20 @@ async function ConnectionService(firstrun, path, doc) {
 let silence = null
 let reinitSite = null // the kpipe restart, set up in runService
 const lastSeen = {}   // name -> the last telegram (ms), carried over a restart (silenceFrom)
-const containerRestarted = {} // container -> when: two sites on one container restart it once
+const containerRestarted = {} // address -> when: two sites on one container restart it once
 // a container restarted this recently isn't restarted again by either ladder
 // (silence or back-off): its VPN and gateway need ~7 min to come back, and
 // two ladders 5-10 min apart only restart a path that's still coming up
 let RESTART_GAP = 15 * 60 * 1000
 
 let docker = (args, cb) => execFile('docker', args, cb) // replaced in tests
+// a container that isn't running (exited, or gone like an --rm L2TP one):
+// utils/vpn-up.sh starts or recreates the one vpn/containers.conf lists at
+// that address, and waits for its tunnel. -n in report mode. cb(output)
+let vpnUp = (ip, dry, cb) => execFile(require('path').join(__dirname, '..', 'utils', 'vpn-up.sh'),
+    dry ? ['-n', '--only', ip] : ['--only', ip],
+    { env: { ...process.env, WAIT: '90' }, timeout: 150 * 1000 },
+    (err, out) => cb(String(out || '') + (err && !out ? `vpn-up failed: ${err.message.trim()}` : '')))
 let CONTAINER_UP = 10 * 1000 // after a container restart, for its VPN to come up
 
 // a site's dns, '' if none: a container site's is its container's IP (172.*)
@@ -659,19 +666,41 @@ function containerFor(ip, cb) {
 
 // restart the container holding ip, at most once per RESTART_GAP whichever
 // ladder asks (sites can share one too); report mode only says what it would
-// do. done(how, wait): wait is true when the container has just been (or is
-// being) restarted
+// do. No running container there (it exited, or an --rm one is gone): vpn-up
+// starts or recreates it. done(how, wait): wait is true when the container
+// has just been (or is being) restarted
 function restartContainer(ip, act, done) {
     containerFor(ip, (cont) => {
-        if (cont === '') return done(`no container at ${ip}`, false)
-        const ago = Date.now() - (containerRestarted[cont] || 0)
-        if (ago < 60 * 1000) return done(`container ${cont} restarted already`, act)
-        if (ago < RESTART_GAP) return done(`container ${cont} restarted ${Math.round(ago / 60000)}m ago`, false)
-        containerRestarted[cont] = Date.now()
+        const which = cont || `at ${ip}`
+        const ago = Date.now() - (containerRestarted[ip] || 0)
+        if (ago < 60 * 1000) return done(`container ${which} restarted already`, act)
+        if (ago < RESTART_GAP) return done(`container ${which} restarted ${Math.round(ago / 60000)}m ago`, false)
+        if (cont === '') return startContainer(ip, act, done)
+        containerRestarted[ip] = Date.now()
         if (!act) return done(`docker restart ${cont}`, false)
         docker(['restart', cont], (err) => {
             done(err ? `docker restart ${cont} FAILED (${err.message.trim()})` : `docker restart ${cont}`, !err)
         })
+    })
+}
+
+// no running container at ip: vpn-up's line for it, e.g. "vpn-up sitebox
+// (172.18.0.30, site): exited - starting", plus whether its tunnel came up
+function startContainer(ip, act, done) {
+    containerRestarted[ip] = Date.now() // a second site meanwhile waits for this one
+    vpnUp(ip, !act, (out) => {
+        const lines = out.split('\n').map((l) => l.replace(/^vpn-up: /, '').trim()).filter(Boolean)
+        const line = lines.find((l) => l.includes(`(${ip}`))
+        if (line == null) {
+            // nothing it could do (no containers.conf line, not enabled ...)
+            delete containerRestarted[ip]
+            return done(`no container at ${ip} (${lines[lines.length - 1] || 'vpn-up said nothing'})`, false)
+        }
+        const failed = lines.find((l) => /failed|didn't create/.test(l))
+        if (failed != null) return done(`vpn-up ${line} FAILED (${failed})`, false)
+        const did = / - (starting|creating)/.test(line)
+        const tunnel = !(act && did) ? '' : lines.some((l) => /^all \d+ tunnels up/.test(l)) ? ', tunnel up' : ', tunnel NOT up yet'
+        done(`vpn-up ${line}${tunnel}`, act && did)
     })
 }
 
@@ -682,7 +711,7 @@ function silenceRestart(name, act, done) {
     const reinit = () => { if (act && reinitSite != null) reinitSite(name) }
     if (!dns.startsWith('172.')) { done('re-init'); return reinit() }
     restartContainer(dns, act, (how) => {
-        const did = /^docker restart \S+$/.test(how) // restarted, or would have in report mode
+        const did = /^docker restart \S+$/.test(how) || (/^vpn-up .* - (starting|creating)/.test(how) && !/FAILED/.test(how)) // restarted, or would have in report mode
         done(did ? `${how} + re-init` : `${how} - re-init only`)
         setTimeout(reinit, did && act ? CONTAINER_UP : 0) // let the VPN come up first
     })
@@ -973,5 +1002,5 @@ module.exports.runService = runService
 module.exports._test = { noteCrash, saveState, startHeartbeat, HEARTBEAT,
     backoffDelay, failures, watchDns, alive, lastSeen,
     requestRestart, downConnected, downRestarts, pending, cancelPending, linkLost,
-    setDocker: (fn) => { docker = fn }, setContainerUp: (ms) => { CONTAINER_UP = ms }, setRestartGap: (ms) => { RESTART_GAP = ms }, setRestartSite: (fn) => { restartSite = fn },
+    setDocker: (fn) => { docker = fn }, setVpnUp: (fn) => { vpnUp = fn }, setContainerUp: (ms) => { CONTAINER_UP = ms }, setRestartGap: (ms) => { RESTART_GAP = ms }, setRestartSite: (fn) => { restartSite = fn },
     setSilence: (s, doc, state) => { silence = s; originalDoc = doc; siteState = state } }

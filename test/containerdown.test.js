@@ -31,6 +31,16 @@ svc.setDocker((args, cb) => {
     if (args[0] === 'restart') return cb(failRestart ? new Error('boom') : null, '')
     cb(new Error('?'))
 })
+// vpn-up --only: 172.18.0.40 = a stopped container (stopbox), anything else
+// has no enabled container site
+const vpnCalls = []
+let vpnOut = null
+svc.setVpnUp((ip, dry, cb) => {
+    vpnCalls.push(`${dry ? '-n ' : ''}${ip}`)
+    if (ip !== '172.18.0.40') return cb(`vpn-up: ${ip}: no enabled container site at this address - nothing to bring up\n`)
+    cb(vpnOut != null ? vpnOut : 'vpn-up: stopbox (172.18.0.40, stopped): exited - starting\n'
+        + (dry ? '' : 'vpn-up: all 1 tunnels up in 4s\n'))
+})
 svc.setContainerUp(5)
 const restarted = []
 svc.setRestartSite((n) => restarted.push(n))
@@ -38,12 +48,13 @@ const doc = (mode) => ({ silence: mode, locations: [
     { name: 'box', dns: '172.18.0.30', enabled: true },
     { name: 'box2', dns: '172.18.0.30', enabled: true },
     { name: 'gone', dns: '172.18.0.99', enabled: true },
+    { name: 'stopped', dns: '172.18.0.40', enabled: true },
     { name: 'direct', dns: 'gw.example', enabled: true }] })
 
 const out = []
 const log = console.log
 console.log = (l) => out.push(l)
-const reset = (name) => { svc.cancelPending(name); svc.downConnected(name); svc.failures[name] = 0; calls.length = 0; restarted.length = 0; out.length = 0 }
+const reset = (name) => { svc.cancelPending(name); svc.downConnected(name); svc.failures[name] = 0; calls.length = 0; vpnCalls.length = 0; restarted.length = 0; out.length = 0 }
 // the delay of the back-off timer requestRestart left, in minutes (null: none)
 const pendingMins = (name) => svc.pending[name] == null ? null : svc.pending[name]._idleTimeout / MIN
 const fail = (name, n) => { for (let i = 0; i < n; i++) svc.requestRestart(name) }
@@ -116,9 +127,39 @@ let checks = 0
         // no container at the IP: retried at once, logged
         fail('gone', 4)
         await wait(20)
-        assert.ok(/^Back-off: gone down, container restart 1: no container at 172\.18\.0\.99$/.test(out.pop())); checks++
+        assert.ok(/^Back-off: gone down, container restart 1: no container at 172\.18\.0\.99 \(172\.18\.0\.99: no enabled container site at this address - nothing to bring up\)$/.test(out.pop())); checks++
         assert.strictEqual(restarted.filter((n) => n === 'gone').length, 4); checks++
         reset('gone')
+        // ... and asking vpn-up again next time isn't held by the restart gap
+        fail('gone', 4)
+        await wait(20)
+        assert.deepStrictEqual(vpnCalls, ['172.18.0.99'], 'vpn-up asked again'); checks++
+        reset('gone')
+
+        // a stopped container (exited 0, which on-failure ignores): vpn-up starts it
+        fail('stopped', 4)
+        await wait(30)
+        assert.deepStrictEqual(vpnCalls, ['172.18.0.40'], 'vpn-up --only its address'); checks++
+        assert.ok(/^Back-off: stopped down, container restart 1: vpn-up stopbox \(172\.18\.0\.40, stopped\): exited - starting, tunnel up$/.test(out.pop())); checks++
+        assert.deepStrictEqual(restarted.filter((n) => n === 'stopped').length, 4, 'then the site'); checks++
+        assert.strictEqual(svc.downRestarts.stopped, 1, 'counted'); checks++
+        reset('stopped')
+        // the same address again within the gap: not again
+        fail('stopped', 4)
+        await wait(20)
+        assert.deepStrictEqual(vpnCalls, [], 'within the gap: no vpn-up'); checks++
+        assert.ok(/^Back-off: stopped down, container at 172\.18\.0\.40 restarted (already|0m ago) - site restart only$/.test(out.pop())); checks++
+        reset('stopped')
+        // a failed start: logged, the site retried at once
+        skew += 16 * MIN
+        vpnOut = 'vpn-up: stopbox (172.18.0.40, stopped): exited - starting\nvpn-up: stopbox: docker start failed\nvpn-up: no containers to wait for\n'
+        fail('stopped', 4)
+        await wait(20)
+        assert.ok(/^Back-off: stopped down, container restart 1: vpn-up stopbox \(172\.18\.0\.40, stopped\): exited - starting FAILED \(stopbox: docker start failed\)$/.test(out.pop())); checks++
+        assert.strictEqual(restarted.filter((n) => n === 'stopped').length, 4, 'site retried at once'); checks++
+        vpnOut = null
+        skew += 16 * MIN
+        reset('stopped')
 
         // uplink down: held, normal back-off
         up = 'netprobe: 4/5 lost'
@@ -144,10 +185,17 @@ let checks = 0
         fail('gone', 4)
         await wait(20)
         assert.strictEqual(pendingMins('gone'), 15, 'report: the usual 15 min'); checks++
-        assert.ok(/^Back-off: gone down, container restart 1: no container at 172\.18\.0\.99 \(report only\)$/.test(out.pop())); checks++
+        assert.ok(/^Back-off: gone down, container restart 1: no container at 172\.18\.0\.99 \(.*\) \(report only\)$/.test(out.pop())); checks++
         fail('gone', 1)
         assert.strictEqual(pendingMins('gone'), 30, 'report: the usual 30 min'); checks++
         reset('gone')
+        // report on a stopped container: vpn-up -n only
+        fail('stopped', 4)
+        await wait(20)
+        assert.deepStrictEqual(vpnCalls, ['-n 172.18.0.40'], 'report: vpn-up -n'); checks++
+        assert.ok(/^Back-off: stopped down, container restart 1: vpn-up stopbox \(172\.18\.0\.40, stopped\): exited - starting \(report only\)$/.test(out.pop())); checks++
+        assert.strictEqual(pendingMins('stopped'), 15, 'report: the usual 15 min'); checks++
+        reset('stopped')
         // report on a running container: would restart, doesn't
         svc.setDocker((args, cb) => {
             calls.push(args.join(' '))
@@ -169,7 +217,7 @@ let checks = 0
         fail('box', 4)
         assert.deepStrictEqual([out.length, calls.length, pendingMins('box')], [0, 0, 15], 'silence off: untouched'); checks++
         reset('box')
-        for (const n of ['box', 'box2', 'gone', 'direct']) svc.cancelPending(n)
+        for (const n of ['box', 'box2', 'gone', 'stopped', 'direct']) svc.cancelPending(n)
     } finally {
         console.log = log
     }

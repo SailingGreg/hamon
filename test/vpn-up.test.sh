@@ -75,6 +75,21 @@ check "wrong address reported" 'grep -q "gammabox: has address 172.18.0.99 , ham
 echo "running 172.18.0.15 yes" > "$D/gammabox"
 check "no conf: exit 1" '! CONF=/nonexistent HAMON="$t/hamon" "$here/utils/vpn-up.sh" >/dev/null'
 
+# --only <address>: just that container (hamon's ladder for a stopped/missing one)
+echo "exited 172.18.0.15 yes" > "$D/gammabox"; echo "exited 172.18.0.11 yes" > "$D/alpha"
+out=$(HAMON="$t/hamon" "$here/utils/vpn-up.sh" -n --only 172.18.0.15)
+check "--only -n: says it, changes nothing" 'grep -q "gammabox (172.18.0.15, gamma): exited - starting" <<< "$out" && ! grep -q alpha <<< "$out" && grep -q "^exited" "$D/gammabox"'
+: > "$D/calls"
+out=$(HAMON="$t/hamon" WAIT=3 "$here/utils/vpn-up.sh" --only 172.18.0.15); rc=$?
+check "--only: that container started, no other" '[ $rc = 0 ] && grep -q "^start gammabox" "$D/calls" && ! grep -q "^start alpha" "$D/calls" && grep -q "all 1 tunnels up" <<< "$out"'
+rm "$D/beta"
+out=$(HAMON="$t/hamon" WAIT=3 "$here/utils/vpn-up.sh" --only 172.18.0.12)
+check "--only: missing container created" 'grep -q "beta (172.18.0.12, beta_lc,beta_hh): missing - creating with beta.sh" <<< "$out" && [ -f "$D/beta" ]'
+out=$(HAMON="$t/hamon" "$here/utils/vpn-up.sh" --only 172.18.0.14); rc=$?
+check "--only: disabled/unknown address, nothing done, exit 0" '[ $rc = 0 ] && grep -q "172.18.0.14: no enabled container site at this address" <<< "$out" && ! grep -q offbox "$D/calls"'
+check "--only without address: exit 1" '! HAMON="$t/hamon" "$here/utils/vpn-up.sh" --only 2>/dev/null'
+echo "running 172.18.0.11 yes" > "$D/alpha"; echo "running 172.18.0.15 yes" > "$D/gammabox"
+
 # the watchdog's VPN check (ha-mon itself reported as stopped, to skip the rest)
 systemctl() { printf 'ActiveState=inactive\nResult=success\nMainPID=0\n'; }; export -f systemctl
 wd() { HAMON="$t/hamon" ENVFILE=/dev/null "$here/hamon-watchdog.sh"; }
