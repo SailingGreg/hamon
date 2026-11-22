@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /*
- * logstream.test.js - knxultimate writes every log line to its exported
- * logStream too. hamon never reads it, so the shim sets it flowing: lines
- * are dropped instead of kept for the life of the process, and a listener
- * added later still gets new lines.
+ * logstream.test.js - knxultimate writes its log lines to its exported
+ * logStream too. hamon never reads it; since 6.4.2 knxultimate only feeds it
+ * while something reads it (before, every line was kept for the life of the
+ * process, and hamon's shim set it flowing). Unread: nothing held; a
+ * listener added later gets new lines, not a backlog.
  */
 const assert = require('assert')
 const dgram = require('dgram')

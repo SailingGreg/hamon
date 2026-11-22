@@ -72,14 +72,9 @@ let sharedLevelSet = false
 function setSharedLevel() {
     if (sharedLevelSet) return
     sharedLevelSet = true
-    const KnxLog = require('knxultimate/build/KnxLog')
-    KnxLog.setLogLevel('warn')
-    // every knxultimate log line is also written to its exported logStream (an
-    // object-mode PassThrough). hamon never reads it, so unread it kept every
-    // line for the life of the process (~0.4 MB/day, more while a site fails).
-    // Flowing with no listener, lines are dropped; a later on('data') still
-    // gets new ones. Drop once knxultimate only feeds it when listened to
-    if (KnxLog.logStream && typeof KnxLog.logStream.resume === 'function') KnxLog.logStream.resume()
+    // (knxultimate >= 6.4.2 feeds its logStream only while it has a reader,
+    // so hamon, which never reads it, needs nothing for it)
+    require('knxultimate/build/KnxLog').setLogLevel('warn')
 }
 // The shared loggers (NPDU, LDATAIND, dptlib...) don't know which client
 // called them. Each site's client is started inside siteContext.run(site), so
